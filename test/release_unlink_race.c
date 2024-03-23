@@ -2,7 +2,10 @@
   This program can be distributed under the terms of the GNU GPLv2.
   See the file COPYING.
 */
-
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
 #define FUSE_USE_VERSION 31
 
 #ifndef _GNU_SOURCE
