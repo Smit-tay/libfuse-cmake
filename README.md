@@ -95,7 +95,17 @@ tests, and other recommended utilities, you will probably want to do this:
                 -DCMAKE_INSTALL_PREFIX=/home/<USER>/FUSE/install \
                 -DCMAKE_BUILD_TYPE=Debug ..
 
+
 To build, test and install, you then use make (or other supported build systems):
+
+  The equivalent for Meson build is as follows:
+  
+    $ meson configure # list options
+    $ meson configure -D disable-mtab=true # set an optionq
+
+    $ # ensure all meson options are applied to the final build system
+    $ meson setup --reconfigure ../
+
 
 IMPORTANT !!! - Almost all tests will fail unless you either
   - run as root

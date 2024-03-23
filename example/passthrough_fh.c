@@ -177,7 +177,7 @@ static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler,
 	while (1) {
 		struct stat st;
 		off_t nextoff;
-		enum fuse_fill_dir_flags fill_flags = 0;
+		enum fuse_fill_dir_flags fill_flags = FUSE_FILL_DIR_DEFAULTS;
 
 		if (!d->entry) {
 			d->entry = readdir(d->dp);
@@ -383,7 +383,6 @@ static int xmp_create(const char *path, mode_t mode, struct fuse_file_info *fi)
 		return -errno;
 
 	fi->fh = fd;
-	fi->parallel_direct_writes = 1;
 	return 0;
 }
 
@@ -404,7 +403,6 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	}
 
 	fi->fh = fd;
-	fi->parallel_direct_writes = 1;
 	return 0;
 }
 
