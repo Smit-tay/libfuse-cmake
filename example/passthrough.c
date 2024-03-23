@@ -22,10 +22,20 @@
  * \include passthrough.c
  */
 
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
 
 #define FUSE_USE_VERSION 31
 
-#define _GNU_SOURCE
+#ifdef HAVE_CONFIG_H
+#include "fuse_config.h"
+#endif
+
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE
+#endif
 
 #ifdef linux
 /* For pread()/pwrite()/utimensat() */
@@ -579,3 +589,9 @@ int main(int argc, char *argv[])
 	}
 	return fuse_main(new_argc, new_argv, &xmp_oper, NULL);
 }
+
+#ifdef ORIG_FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+    #define FUSE_USE_VERSION ORIG_FUSE_USE_VERSION
+    #undef ORIG_FUSE_USE_VERSION
+#endif

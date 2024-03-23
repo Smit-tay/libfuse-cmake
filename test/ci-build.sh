@@ -98,6 +98,7 @@ sanitized_build()
 
     # reconfigure to ensure it uses all additional options
     meson setup --reconfigure "${SOURCE_DIR}"
+
     ninja
     sudo ninja install
     sudo chmod 4755 ${PREFIX_DIR}/bin/fusermount3
@@ -122,6 +123,7 @@ sanitized_build()
 export CC=clang
 export CXX=clang++
 TEST_WITH_VALGRIND=false
+
 sanitized_build
 
 # Sanitized build without libc versioned symbols

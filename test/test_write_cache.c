@@ -6,10 +6,17 @@
   See the file COPYING.
 */
 
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
 
 #define FUSE_USE_VERSION 30
 
-#define _GNU_SOURCE /* for loff_t */
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE /* for loff_t */
+#endif
+
 
 #include <fuse_config.h>
 #include <fuse_lowlevel.h>
@@ -18,6 +25,10 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+// assert is used profusely in here, make sure it is enabled
+#ifdef NDEBUG
+    #undef NDEBUG
+#endif
 #include <assert.h>
 #include <stddef.h>
 #include <unistd.h>

@@ -9,7 +9,9 @@
 */
 
 /* For environ */
-#define _GNU_SOURCE
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE
+#endif
 
 #include "fuse_config.h"
 #include "fuse_i.h"

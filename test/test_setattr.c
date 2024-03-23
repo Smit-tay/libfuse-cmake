@@ -6,6 +6,10 @@
   See the file COPYING.
 */
 
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
 
 #define FUSE_USE_VERSION 30
 
@@ -16,6 +20,10 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+// assert is used profusely in here, make sure it is enabled
+#ifdef NDEBUG
+    #undef NDEBUG
+#endif
 #include <assert.h>
 #include <stddef.h>
 #include <unistd.h>

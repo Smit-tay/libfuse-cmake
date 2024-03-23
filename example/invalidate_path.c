@@ -25,6 +25,11 @@
  * \include invalidate_path.c
  */
 
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
+
 #define FUSE_USE_VERSION 34
 
 #include <fuse.h>
@@ -35,6 +40,10 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+// assert is used profusely in here, make sure it is enabled
+#ifdef NDEBUG
+    #undef NDEBUG
+#endif
 #include <assert.h>
 #include <stddef.h>
 #include <unistd.h>
@@ -290,3 +299,9 @@ out1:
 	fuse_opt_free_args(&args);
 	return res;
 }
+
+#ifdef ORIG_FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+    #define FUSE_USE_VERSION ORIG_FUSE_USE_VERSION
+    #undef ORIG_FUSE_USE_VERSION
+#endif

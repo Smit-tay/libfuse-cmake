@@ -33,8 +33,15 @@
  * ## Source code ##
  * \include passthrough_ll.c
  */
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE
+#endif
 
-#define _GNU_SOURCE
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
+
 #define FUSE_USE_VERSION 34
 
 #include <fuse_lowlevel.h>
@@ -1326,3 +1333,9 @@ err_out1:
 	free(lo.source);
 	return ret ? 1 : 0;
 }
+
+#ifdef ORIG_FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+    #define FUSE_USE_VERSION ORIG_FUSE_USE_VERSION
+    #undef ORIG_FUSE_USE_VERSION
+#endif

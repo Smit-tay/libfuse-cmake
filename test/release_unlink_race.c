@@ -5,7 +5,9 @@
 
 #define FUSE_USE_VERSION 31
 
-#define _GNU_SOURCE
+#ifndef _GNU_SOURCE
+    #define _GNU_SOURCE
+#endif
 
 #include <fuse.h>
 

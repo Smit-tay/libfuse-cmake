@@ -4,6 +4,14 @@ libfuse
 About
 -----
 
+This is a fork of the libfuse reference implementation which may be found here:
+[https://github.com/libfuse/libfuse](https://github.com/libfuse/libfuse)
+
+This fork is designed to build with **CMake**, otherwise it should be identical to
+the reference platform.  The best reference for using libfuse is the reference
+implementation.  BUT - This is the place to come for information about building
+libfuse with CMake instead of meson.
+
 FUSE (Filesystem in Userspace) is an interface for userspace programs
 to export a filesystem to the Linux kernel. The FUSE project consists
 of two components: the *fuse* kernel module (maintained in the regular
@@ -61,37 +69,70 @@ trustworthy source. Each libfuse release contains the signing key for the releas
 in the `signify` directory, so you only need to manually acquire this file once when you
 install libfuse for the first time.
 
-After you have validated the tarball, extract it, create a (temporary) build directory and
-run Meson:
+To build and install, you are free to use meson or CMake
 
-    $ tar xzf fuse-X.Y.Z.tar.gz; cd fuse-X.Y.Z
+We recommend to use [CMake](https://cmake.org/) the hugely superior meta-make
+system.  CMake allows a developer to use a wide variety of build systems and
+includes native support for various command-line or GUI environments such as
+Visual Studio, Eclipse, CodeBlocks, Ninja, or plain old Unix make.
+
+You are free to use the Unix make, Ninja, or any other CMake supported make
+system - see, CMake is better than meson !
+
+Out of source builds are *highly* recommended.  Simply create a (temporary)
+build directory and run CMake:
+
     $ mkdir build; cd build
-    $ meson setup ..
+    $ cmake ..
 
-Normally, the default build options will work fine. If you
-nevertheless want to adjust them, you can do so with the
-*meson configure* command:
+Normally, the default build options will work fine. However, to build examples,
+tests, and other recommended utilities, you will probably want to do this:
+(this also explicitly uses Unix Makefiles - the cmake default)
 
+   $ cmake -G "Unix Makefiles" \
+                -DOPTION_BUILD_UTILS=ON \
+                -DOPTION_BUILD_EXAMPLES=ON \
+                -DCMAKE_INSTALL_PREFIX=/home/<USER>/FUSE/install \
+                -DCMAKE_BUILD_TYPE=Debug ..
+
+
+To build, test and install, you then use make (or other supported build systems):
+
+  The equivalent for Meson build is as follows:
+  
     $ meson configure # list options
     $ meson configure -D disable-mtab=true # set an optionq
 
     $ # ensure all meson options are applied to the final build system
     $ meson setup --reconfigure ../
 
-To build, test, and install libfuse, you then use Ninja:
 
-    $ ninja
-    $ sudo python3 -m pytest test/
-    $ sudo ninja install
+IMPORTANT !!! - Almost all tests will fail unless you either
+  - run as root
+  - change permissions on  util/fusermount3 (see blow)
 
-Running the tests requires the [py.test](http://www.pytest.org/)
-Python module. Instead of running the tests as root, the majority of
+
+    $ make
+    $ python3 -m pytest test/
+    $ sudo make install
+
+NOTE:  One of the primary outstanding issues (with this libfuse-Cmake fork) is
+to remove any dependency upon python.  Expect to see native ctest replace python
+pytest soon.  IMPORTANT - Tests current perform best when run under python3.6.
+Issues have been reported attempting to use python3.7 with pytest.
+
+Running the tests requires the [py.test](http://www.pytest.org/) Python module. 
+
+Instead of running the tests as root, the majority of
 tests can also be run as a regular user if *util/fusermount3* is made
 setuid root first:
 
     $ sudo chown root:root util/fusermount3
     $ sudo chmod 4755 util/fusermount3
     $ python3 -m pytest test/
+
+NOTE: Some tests are designed to "drop privileges" and so will be skipped if the
+user is not root.
 
 Security implications
 ---------------------
@@ -160,3 +201,12 @@ https://lists.sourceforge.net/lists/listinfo/fuse-devel).
 
 Please report any bugs on the GitHub issue tracker at
 https://github.com/libfuse/libfuse/issues.
+
+Please report CMake related libfuse bugs here:
+https://github.com/Smit-tay/libfuse-cmake/issues
+
+
+Professional Support
+--------------------
+
+Professional support is offered via [Rath Consulting](http://www.rath-consulting.biz).

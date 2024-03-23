@@ -43,10 +43,14 @@
  * \include passthrough_hp.cc
  */
 
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 12)
 
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE
+    #define _GNU_SOURCE
 #endif
 
 // C includes
@@ -1404,3 +1408,8 @@ err_out1:
     return ret ? 1 : 0;
 }
 
+#ifdef ORIG_FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+    #define FUSE_USE_VERSION ORIG_FUSE_USE_VERSION
+    #undef ORIG_FUSE_USE_VERSION
+#endif
