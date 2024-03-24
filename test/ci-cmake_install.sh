@@ -1,4 +1,4 @@
-# CMake developer team in Kitware Inc provides APT repositiory. It allows you to install latest CMake via apt-get.
+# CMake developer team in Kitware Inc provides APT repository. It allows you to install latest CMake via apt-get.
 
 #If you are using a minimal Ubuntu image or a Docker image, you may need to install the following packages:
 
