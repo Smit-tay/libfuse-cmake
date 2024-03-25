@@ -16,6 +16,8 @@ def get_printcap():
     proc = subprocess.Popen(cmdline, stdout=subprocess.PIPE,
                             universal_newlines=True)
     (stdout, _) = proc.communicate(30)
+    print("Output of the command: ")
+    print(stdout)
     assert proc.returncode == 0
 
     proto = None
