@@ -57,7 +57,7 @@ for CC in gcc gcc-9 gcc-10 clang; do
         -DCMAKE_BUILD_TYPE=Debug \
         "${SOURCE_DIR}" 
     make
-    make install
+    sudo make install
 
     # libfuse will first try the install path and then system defaults
     sudo chmod 4755 ${PREFIX_DIR}/bin/fusermount3
