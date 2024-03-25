@@ -89,22 +89,36 @@ Normally, the default build options will work fine. However, to build examples,
 tests, and other recommended utilities, you will probably want to do this:
 (this also explicitly uses Unix Makefiles - the cmake default)
 
+```
+
    $ cmake -G "Unix Makefiles" \
                 -DOPTION_BUILD_UTILS=ON \
                 -DOPTION_BUILD_EXAMPLES=ON \
                 -DCMAKE_INSTALL_PREFIX=/home/<USER>/FUSE/install \
                 -DCMAKE_BUILD_TYPE=Debug ..
+                
+```
 
 To build, test and install, you then use make (or other supported build systems):
+
+  The equivalent for Meson build is as follows:
+  
+    $ meson configure # list options
+    $ meson configure -D disable-mtab=true # set an optionq
+
+    $ # ensure all meson options are applied to the final build system
+    $ meson setup --reconfigure ../
+
 
 IMPORTANT !!! - Almost all tests will fail unless you either
   - run as root
   - change permissions on  util/fusermount3 (see blow)
 
-
+```
     $ make
     $ python3 -m pytest test/
     $ sudo make install
+```
 
 NOTE:  One of the primary outstanding issues (with this libfuse-Cmake fork) is
 to remove any dependency upon python.  Expect to see native ctest replace python
