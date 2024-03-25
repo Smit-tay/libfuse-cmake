@@ -51,10 +51,11 @@ for CC in gcc gcc-9 gcc-10 clang; do
     fi
 
     cmake -G "Unix Makefiles" \
-            -DOPTION_BUILD_UTILS=ON \
-            -DOPTION_BUILD_EXAMPLES=ON \
-            -DCMAKE_INSTALL_PREFIX=${PREFIX_DIR} \
-            -DCMAKE_BUILD_TYPE=Debug "${SOURCE_DIR}" 
+        -DOPTION_BUILD_UTILS=ON \
+        -DOPTION_BUILD_EXAMPLES=ON \
+        -DCMAKE_INSTALL_PREFIX=${PREFIX_DIR} \
+        -DCMAKE_BUILD_TYPE=Debug \
+        "${SOURCE_DIR}" 
     make
     make install
 
