@@ -14,7 +14,7 @@ struct mount_opts;
 struct fuse_req {
 	struct fuse_session *se;
 	uint64_t unique;
-	int ctr;
+	_Atomic int ref_cnt;
 	pthread_mutex_t lock;
 	struct fuse_ctx ctx;
 	struct fuse_chan *ch;
@@ -65,6 +65,11 @@ struct fuse_session {
 	struct fuse_notify_req notify_list;
 	size_t bufsize;
 	int error;
+
+	/* This is useful if any kind of ABI incompatibility is found at
+	 * a later version, to 'fix' it at run time.
+	 */
+	struct libfuse_version version;
 };
 
 struct fuse_chan {

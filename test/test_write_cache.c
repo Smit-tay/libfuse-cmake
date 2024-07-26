@@ -225,7 +225,7 @@ static void test_fs(char *mountpoint) {
     const size_t dsize = options.data_size * WRITE_SYSCALLS;
     int fd, rofd;
     pthread_t rofd_thread;
-    loff_t off = 0;
+    off_t off = 0;
 
     buf = malloc(dsize);
     assert(buf != NULL);

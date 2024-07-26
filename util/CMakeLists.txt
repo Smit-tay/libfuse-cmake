@@ -41,7 +41,7 @@ target_include_directories(mount.fuse3
 target_link_libraries(mount.fuse3 fuse3)
 
 target_compile_definitions(mount.fuse3
-						   PUBLIC FUSE_USE_VERSION=312)
+						   PUBLIC FUSE_USE_VERSION=317)
 install(TARGETS mount.fuse3 RUNTIME
         DESTINATION ${CMAKE_INSTALL_SBINDIR})
 

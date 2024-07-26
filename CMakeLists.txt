@@ -11,6 +11,11 @@ project (libfuse3
          HOMEPAGE_URL https://github.com/Smit-tay/libfuse-cmake
          LANGUAGES C CXX)
 
+string(REPLACE "." ";" VERSION_LIST ${PROJECT_VERSION})
+list(GET VERSION_LIST 0 FUSE_MAJOR_VERSION)
+list(GET VERSION_LIST 1 FUSE_MINOR_VERSION)
+list(GET VERSION_LIST 2 FUSE_HOTFIX_VERSION)
+
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   message(FATAL_ERROR "libfuse does not support OS-X.\n"
@@ -41,6 +46,7 @@ if (NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
   endif()
 endif()
 
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -79,6 +85,7 @@ set(include_default "stdio.h;stdlib.h;stddef.h;unistd.h;sys/types.h;sys/stat.h;f
 # Possibly because of that, testing with check_symbol_exists
 # fails, so we use check_function_exists instead
 check_function_exists("fork"                                HAVE_FORK)
+check_function_exists("backtrace"                      HAVE_BACKTRACE)
 
 check_symbol_exists("fstatat"         ${include_default}    HAVE_FSTATAT)
 check_symbol_exists("openat"          ${include_default}    HAVE_OPENAT)
@@ -223,7 +230,14 @@ else()
   message("NOT building examples")
 endif()
 
+# For reasons - libfuse defines a public and a private config.
+# I don't understand the purpose of differentiating
+# So, I make them the same
 configure_file (
     "${PROJECT_SOURCE_DIR}/config.h.in"
     "${PROJECT_BINARY_DIR}/fuse_config.h"
+)
+configure_file (
+    "${PROJECT_SOURCE_DIR}/config.h.in"
+    "${PROJECT_BINARY_DIR}/libfuse_config.h"
 )
