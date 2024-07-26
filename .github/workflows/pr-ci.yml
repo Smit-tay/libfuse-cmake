@@ -27,5 +27,5 @@ jobs:
        - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
       - uses: threeal/cmake-action@v1.3.0
       - run: test/ci-install.sh
-      - run: test/ci-cmake_build.sh      
-#      - run: test/ci-build.sh
+      - run: test/ci-cmake_build.sh
+
