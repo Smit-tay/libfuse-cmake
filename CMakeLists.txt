@@ -167,7 +167,7 @@ set(COMPILE_ME [=[
             return 100; //printf("no need to escape\n");
     }
 ]=])
-
+message(STATUS "Performing Test GETMNTENT_ESCAPING")
 try_run(
 	RUN_RESULT
 	COMPILE_RESULT
