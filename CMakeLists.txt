@@ -122,7 +122,7 @@ int main(void) {
 
 CHECK_C_SOURCE_COMPILES("${CHECK_UNUSED_RESULT_WARNING}" CHECK_UNUSED_RESULT)
 if(CHECK_UNUSED_RESULT)
-  message(WARNING "Compiler warns about unused result even when casting to void")
+  message(STATUS "Compiler warns about unused result even when casting to void")
   add_compile_options("-Wno-unused-result")
 endif()
 
@@ -140,7 +140,7 @@ CHECK_C_SOURCE_COMPILES("${CHECK_SYMVER_SUPPORT_WARNING}" CHECK_SYMVER_SUPPORT)
 if(CHECK_SYMVER_SUPPORT)
     set(HAVE_SYMVER_ATTRIBUTE ON)
 else()
-    message(WARNING "Compiler does not support symver attribute")
+    message(STATUS "Compiler does not support symver attribute")
 endif()
 
 # Older versions of musl libc don't unescape entries in /etc/mtab
@@ -186,7 +186,7 @@ else()
 		message(STATUS "getmntent does NOT require escaping")
 	elseif(RUN_RESULT EQUAL 99)
 		set(GETMNTENT_NEEDS_UNESCAPING TRUE CACHE BOOL "getmntent requires escaping")
-		message(WARNING "getmntent REQUIRES escaping")
+		message(STATUS "getmntent REQUIRES escaping")
 	else()
 		message(WARNING "Unknown error returned from testing for getmntent. Value: ${RUN_RESULT}.\nOutput ${RUN_OUT_TXT}")
 	endif()
