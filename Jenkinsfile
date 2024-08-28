@@ -39,23 +39,25 @@ pipeline {
                 // To accomplish this - in a reasonably secure manner - under
                 // a Jenkins job (which normally runs as an unprivileged user)
                 // we need two 'helpers' and make use of a customized suders rule file for Jenkins.
+                // this limits jenkins sudo to only executing these commands
                 // etc/sudoers.d/jenkins looks like this:
                 //     jenkins <HOSTNAME> = (root) NOPASSWD: /usr/bin/chmod-jenkins, /usr/bin/chown-jenkins
                 // The two files just call the real chown and chmod like this:
-                // * Actually, they perform a basic sanity test on the parameters first
+                //  /usr/bin/chown "$@"
+                //   and
+                //  /usr/bin/chmod "$@"
+                // * Actually, they should perform a basic sanity test on the parameters first
                 // * for example:    dirname and basename could be checked
                 // * as well as maybe even doing an 'nm' on the file to see if it
                 // * contains symbols that only fusermount3 would have
                 // * There are many other options to help you feel safe with this.
-                //  /usr/bin/chown "$@"
-                //   and
-                //  /usr/bin/chmod "$@"
+                
                 // Don't forget to set executable on them !
                 sh '''
                    cd build
                    sudo /usr/bin/chown-jenkins root:root util/fusermount3
                    sudo /usr/bin/chmod-jenkins 4755 util/fusermount3
-                   /usr/local/bin/pytest test/
+                   pytest test/
                    '''
             }
         }
