@@ -181,6 +181,7 @@ try_run(
 if(NOT COMPILE_RESULT)
 	message(WARNING  "Compiling test for getmntent failed with output: ${COMPILE_OUT_TXT}")
 else()
+	message(STATUS "Performing Test GETMNTENT_ESCAPING - Success")
 	# Check the result of try_run using regex
 	if(RUN_RESULT EQUAL 100)
 		message(STATUS "getmntent does NOT require escaping")
