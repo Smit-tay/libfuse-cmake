@@ -2116,19 +2116,9 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 
 	se->conn.time_gran = 1;
 
-	if (bufsize < FUSE_MIN_READ_BUFFER) {
-		fuse_log(FUSE_LOG_ERR, "fuse: warning: buffer size too small: %zu\n",
-			bufsize);
-		bufsize = FUSE_MIN_READ_BUFFER;
-	}
-	se->bufsize = bufsize;
-
 	se->got_init = 1;
 	if (se->op.init)
 		se->op.init(se->userdata, &se->conn);
-
-	if (se->conn.max_write > bufsize - FUSE_BUFFER_HEADER_SIZE)
-		se->conn.max_write = bufsize - FUSE_BUFFER_HEADER_SIZE;
 
 	if (se->conn.want & (~se->conn.capable)) {
 		fuse_log(FUSE_LOG_ERR, "fuse: error: filesystem requested capabilities "
@@ -2151,9 +2141,16 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 		return;
 	}
 
-	if (se->conn.max_write < bufsize - FUSE_BUFFER_HEADER_SIZE) {
-		se->bufsize = se->conn.max_write + FUSE_BUFFER_HEADER_SIZE;
+	if (bufsize < FUSE_MIN_READ_BUFFER) {
+		fuse_log(FUSE_LOG_ERR,
+			 "fuse: warning: buffer size too small: %zu\n",
+			 bufsize);
+		bufsize = FUSE_MIN_READ_BUFFER;
 	}
+
+	se->conn.max_write = MIN(se->conn.max_write, bufsize - FUSE_BUFFER_HEADER_SIZE);
+	se->bufsize = se->conn.max_write + FUSE_BUFFER_HEADER_SIZE;
+
 	if (arg->flags & FUSE_MAX_PAGES) {
 		outarg.flags |= FUSE_MAX_PAGES;
 		outarg.max_pages = (se->conn.max_write - 1) / getpagesize() + 1;
@@ -2909,6 +2906,29 @@ static void fuse_ll_pipe_destructor(void *data)
 	fuse_ll_pipe_free(llp);
 }
 
+static unsigned int get_max_pages(void)
+{
+	char buf[32];
+	int res;
+	int fd;
+
+	fd = open("/proc/sys/fs/fuse/max_pages_limit", O_RDONLY);
+	if (fd < 0)
+		return FUSE_DEFAULT_MAX_PAGES_LIMIT;
+
+	res = read(fd, buf, sizeof(buf) - 1);
+
+	close(fd);
+
+	if (res < 0)
+		return FUSE_DEFAULT_MAX_PAGES_LIMIT;
+
+	buf[res] = '\0';
+
+	res = strtol(buf, NULL, 10);
+	return res < 0 ? FUSE_DEFAULT_MAX_PAGES_LIMIT : res;
+}
+
 int fuse_session_receive_buf(struct fuse_session *se, struct fuse_buf *buf)
 {
 	return fuse_session_receive_buf_int(se, buf, NULL);
@@ -3144,7 +3164,7 @@ struct fuse_session *_fuse_session_new_317(struct fuse_args *args,
 	if (se->debug)
 		fuse_log(FUSE_LOG_DEBUG, "FUSE library version: %s\n", PACKAGE_VERSION);
 
-	se->bufsize = FUSE_MAX_MAX_PAGES * getpagesize() +
+	se->bufsize = get_max_pages() * getpagesize() +
 		FUSE_BUFFER_HEADER_SIZE;
 
 	list_init_req(&se->list);
