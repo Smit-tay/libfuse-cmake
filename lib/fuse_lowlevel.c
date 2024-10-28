@@ -19,6 +19,7 @@
 #include "fuse_opt.h"
 #include "fuse_misc.h"
 #include "mount_util.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -667,9 +668,9 @@ static int read_back(int fd, char *buf, size_t len)
 
 static int grow_pipe_to_max(int pipefd)
 {
-	int max;
 	int res;
-	int maxfd;
+	long max;
+	long maxfd;
 	char buf[32];
 
 	maxfd = open("/proc/sys/fs/pipe-max-size", O_RDONLY);
@@ -687,7 +688,9 @@ static int grow_pipe_to_max(int pipefd)
 	close(maxfd);
 	buf[res] = '\0';
 
-	max = atoi(buf);
+	res = libfuse_strtol(buf, &max);
+	if (res)
+		return res;
 	res = fcntl(pipefd, F_SETPIPE_SZ, max);
 	if (res < 0)
 		return -errno;
@@ -2909,8 +2912,9 @@ static void fuse_ll_pipe_destructor(void *data)
 static unsigned int get_max_pages(void)
 {
 	char buf[32];
-	int res;
+	long res;
 	int fd;
+	int err;
 
 	fd = open("/proc/sys/fs/fuse/max_pages_limit", O_RDONLY);
 	if (fd < 0)
@@ -2925,8 +2929,8 @@ static unsigned int get_max_pages(void)
 
 	buf[res] = '\0';
 
-	res = strtol(buf, NULL, 10);
-	return res < 0 ? FUSE_DEFAULT_MAX_PAGES_LIMIT : res;
+	err = libfuse_strtol(buf, &res);
+	return err ? FUSE_DEFAULT_MAX_PAGES_LIMIT : res;
 }
 
 int fuse_session_receive_buf(struct fuse_session *se, struct fuse_buf *buf)

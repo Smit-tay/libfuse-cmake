@@ -12,6 +12,7 @@
 #endif
 #include "fuse_config.h"
 #include "mount_util.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1502,7 +1503,7 @@ int main(int argc, char *argv[])
 	static int lazy = 0;
 	static int quiet = 0;
 	char *commfd = NULL;
-	int cfd;
+	long cfd;
 	const char *opts = "";
 	const char *type = NULL;
 	int setup_auto_unmount_only = 0;
@@ -1606,13 +1607,20 @@ int main(int argc, char *argv[])
 		goto err_out;
 	}
 
-	cfd = atoi(commfd);
+	res = libfuse_strtol(commfd, &cfd);
+	if (res) {
+		fprintf(stderr,
+			"%s: invalid _FUSE_COMMFD: %s\n",
+			progname, commfd);
+		goto err_out;
+
+	}
 	{
 		struct stat statbuf;
 		fstat(cfd, &statbuf);
 		if(!S_ISSOCK(statbuf.st_mode)) {
 			fprintf(stderr,
-				"%s: file descriptor %i is not a socket, can't send fuse fd\n",
+				"%s: file descriptor %li is not a socket, can't send fuse fd\n",
 				progname, cfd);
 			goto err_out;
 		}
