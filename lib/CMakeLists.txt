@@ -24,7 +24,7 @@ target_sources(fuse3 PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/fuse_log.c 
     ${CMAKE_CURRENT_SOURCE_DIR}/compat.c 
     ${CMAKE_CURRENT_SOURCE_DIR}/util.c 
-    ${CMAKE_CURRENT_SOURCE_DIR}/compat.h)
+    ${CMAKE_CURRENT_SOURCE_DIR}/util.h)
 
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
