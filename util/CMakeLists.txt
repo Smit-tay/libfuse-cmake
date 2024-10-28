@@ -16,7 +16,7 @@ set(FUSECONF_PATH ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/fuse.conf)
 #           install: true,
 #           install_dir: get_option('bindir'),
 #           c_args: '-DFUSE_CONF="@0@"'.format(fuseconf_path))
-add_executable(fusermount3 fusermount.c ../lib/mount_util.c)
+add_executable(fusermount3 fusermount.c ../lib/mount_util.c ../lib/util.c)
 
 target_include_directories(fusermount3
                            PUBLIC ${INCLUDE_DIRS})
