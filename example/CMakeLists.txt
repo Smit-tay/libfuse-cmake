@@ -52,7 +52,7 @@ if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "bsd$" AND NOT ${CMAKE_SYSTEM_NAME} STREQUA
         list(REMOVE_ITEM _target_cxx_flags -Wstrict-prototypes)
         set_target_properties(passthrough_hp PROPERTIES COMPILE_OPTIONS "${_target_cxx_flags}")
     endif()
-     add_executable(memfs_ll, memfs_ll.cc)
+     add_executable(memfs_ll memfs_ll.cc)
      target_link_libraries(memfs_ll  ${CMAKE_THREAD_LIBS_INIT} fuse3)
 endif()
 
