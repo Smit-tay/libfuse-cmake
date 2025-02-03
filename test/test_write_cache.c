@@ -16,6 +16,8 @@
 #ifndef _GNU_SOURCE
     #define _GNU_SOURCE /* for loff_t */
 #endif
+/* Not really needed - just to test build with FUSE_USE_VERSION == 30 */
+#include <fuse.h>
 
 
 #include <fuse_config.h>
@@ -78,7 +80,7 @@ static void tfs_init (void *userdata, struct fuse_conn_info *conn)
     (void) userdata;
 
     if(options.writeback) {
-        assert(conn->capable & FUSE_CAP_WRITEBACK_CACHE);
+        assert(fuse_get_feature_flag(conn, FUSE_CAP_WRITEBACK_CACHE));
         conn->want |= FUSE_CAP_WRITEBACK_CACHE;
     }
 }

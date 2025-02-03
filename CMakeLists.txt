@@ -6,7 +6,7 @@ cmake_minimum_required (VERSION 3.12.0)
 set (CMAKE_VERBOSE_MAKEFILE FALSE)
 
 project (libfuse3
-         VERSION 3.16.2
+         VERSION 3.17.0
          DESCRIPTION "The CMake implementation of the Linux FUSE (Filesystem in Userspace) interface"
          HOMEPAGE_URL https://github.com/Smit-tay/libfuse-cmake
          LANGUAGES C CXX)
@@ -47,7 +47,7 @@ if (NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
 endif()
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # This needs to be looked at - is linux=1 necessary ?
@@ -210,9 +210,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lib)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/test)
 
-option(OPTION_BUILD_UTILS "Also build utils and docs" OFF)
+option(OPTION_BUILD_UTILS "Also build utils and docs" ON)
 
-option(OPTION_BUILD_UTILS "Also build utils and docs" OFF)
 if(OPTION_BUILD_UTILS)
   if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD" AND NOT  ${CMAKE_SYSTEM_NAME} MATCHES "DRAGONFLY" )
     message("Also building utils and docs")
@@ -223,7 +222,7 @@ else()
   message("NOT building utils and docs")
 endif()
 
-option(OPTION_BUILD_EXAMPLES "Also build examples" OFF)
+option(OPTION_BUILD_EXAMPLES "Also build examples" ON)
 if(OPTION_BUILD_EXAMPLES)
   message("Also building examples")
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/example)

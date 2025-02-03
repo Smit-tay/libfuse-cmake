@@ -729,7 +729,7 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 		goto fallback;
 
 	if (se->conn.proto_minor < 14 ||
-	    !(se->conn.want & FUSE_CAP_SPLICE_WRITE))
+	    !(se->conn.want_ext & FUSE_CAP_SPLICE_WRITE))
 		goto fallback;
 
 	llp = fuse_ll_get_pipe(se);
@@ -870,7 +870,7 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 
 	splice_flags = 0;
 	if ((flags & FUSE_BUF_SPLICE_MOVE) &&
-	    (se->conn.want & FUSE_CAP_SPLICE_MOVE))
+	    (se->conn.want_ext & FUSE_CAP_SPLICE_MOVE))
 		splice_flags |= SPLICE_F_MOVE;
 
 	if (se->io != NULL && se->io->splice_send != NULL) {
@@ -1411,7 +1411,7 @@ static void do_open(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 
 	if (req->se->op.open)
 		req->se->op.open(req, nodeid, &fi);
-	else if (req->se->conn.want & FUSE_CAP_NO_OPEN_SUPPORT)
+	else if (req->se->conn.want_ext & FUSE_CAP_NO_OPEN_SUPPORT)
 		fuse_reply_err(req, ENOSYS);
 	else
 		fuse_reply_open(req, &fi);
@@ -1569,7 +1569,7 @@ static void do_opendir(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 
 	if (req->se->op.opendir)
 		req->se->op.opendir(req, nodeid, &fi);
-	else if (req->se->conn.want & FUSE_CAP_NO_OPENDIR_SUPPORT)
+	else if (req->se->conn.want_ext & FUSE_CAP_NO_OPENDIR_SUPPORT)
 		fuse_reply_err(req, ENOSYS);
 	else
 		fuse_reply_open(req, &fi);
@@ -1652,7 +1652,7 @@ static void do_statfs(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 static void do_setxattr(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 {
 	struct fuse_session *se = req->se;
-	unsigned int xattr_ext = !!(se->conn.want & FUSE_CAP_SETXATTR_EXT);
+	unsigned int xattr_ext = !!(se->conn.want_ext & FUSE_CAP_SETXATTR_EXT);
 	struct fuse_setxattr_in *arg = (struct fuse_setxattr_in *) inarg;
 	char *name = xattr_ext ? PARAM(arg) :
 		     (char *)arg + FUSE_COMPAT_SETXATTR_IN_SIZE;
@@ -1883,7 +1883,7 @@ static void do_ioctl(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	struct fuse_file_info fi;
 
 	if (flags & FUSE_IOCTL_DIR &&
-	    !(req->se->conn.want & FUSE_CAP_IOCTL_DIR)) {
+	    !(req->se->conn.want_ext & FUSE_CAP_IOCTL_DIR)) {
 		fuse_reply_err(req, ENOTTY);
 		return;
 	}
@@ -1998,6 +1998,25 @@ static bool want_flags_valid(uint64_t capable, uint64_t want)
 	return true;
 }
 
+/**
+ * Get the wanted capability flags, converting from old format if necessary
+ */
+static inline int convert_to_conn_want_ext(struct fuse_conn_info *conn,
+					   uint64_t want_ext_default)
+{
+	/* Convert want to want_ext if necessary */
+	if (conn->want != 0) {
+		if (conn->want_ext != want_ext_default) {
+			fuse_log(FUSE_LOG_ERR,
+				 "fuse: both 'want' and 'want_ext' are set\n");
+			return -EINVAL;
+		}
+		conn->want_ext |= conn->want;
+	}
+
+	return 0;
+}
+
 /* Prevent bogus data races (bogus since "init" is called before
  * multi-threading becomes relevant */
 static __attribute__((no_sanitize("thread")))
@@ -2022,8 +2041,8 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	}
 	se->conn.proto_major = arg->major;
 	se->conn.proto_minor = arg->minor;
-	se->conn.capable = 0;
-	se->conn.want = 0;
+	se->conn.capable_ext = 0;
+	se->conn.want_ext = 0;
 
 	memset(&outarg, 0, sizeof(outarg));
 	outarg.major = FUSE_KERNEL_VERSION;
@@ -2049,45 +2068,45 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 		if (inargflags & FUSE_INIT_EXT)
 			inargflags = inargflags | (uint64_t) arg->flags2 << 32;
 		if (inargflags & FUSE_ASYNC_READ)
-			se->conn.capable |= FUSE_CAP_ASYNC_READ;
+			se->conn.capable_ext |= FUSE_CAP_ASYNC_READ;
 		if (inargflags & FUSE_POSIX_LOCKS)
-			se->conn.capable |= FUSE_CAP_POSIX_LOCKS;
+			se->conn.capable_ext |= FUSE_CAP_POSIX_LOCKS;
 		if (inargflags & FUSE_ATOMIC_O_TRUNC)
-			se->conn.capable |= FUSE_CAP_ATOMIC_O_TRUNC;
+			se->conn.capable_ext |= FUSE_CAP_ATOMIC_O_TRUNC;
 		if (inargflags & FUSE_EXPORT_SUPPORT)
-			se->conn.capable |= FUSE_CAP_EXPORT_SUPPORT;
+			se->conn.capable_ext |= FUSE_CAP_EXPORT_SUPPORT;
 		if (inargflags & FUSE_DONT_MASK)
-			se->conn.capable |= FUSE_CAP_DONT_MASK;
+			se->conn.capable_ext |= FUSE_CAP_DONT_MASK;
 		if (inargflags & FUSE_FLOCK_LOCKS)
-			se->conn.capable |= FUSE_CAP_FLOCK_LOCKS;
+			se->conn.capable_ext |= FUSE_CAP_FLOCK_LOCKS;
 		if (inargflags & FUSE_AUTO_INVAL_DATA)
-			se->conn.capable |= FUSE_CAP_AUTO_INVAL_DATA;
+			se->conn.capable_ext |= FUSE_CAP_AUTO_INVAL_DATA;
 		if (inargflags & FUSE_DO_READDIRPLUS)
-			se->conn.capable |= FUSE_CAP_READDIRPLUS;
+			se->conn.capable_ext |= FUSE_CAP_READDIRPLUS;
 		if (inargflags & FUSE_READDIRPLUS_AUTO)
-			se->conn.capable |= FUSE_CAP_READDIRPLUS_AUTO;
+			se->conn.capable_ext |= FUSE_CAP_READDIRPLUS_AUTO;
 		if (inargflags & FUSE_ASYNC_DIO)
-			se->conn.capable |= FUSE_CAP_ASYNC_DIO;
+			se->conn.capable_ext |= FUSE_CAP_ASYNC_DIO;
 		if (inargflags & FUSE_WRITEBACK_CACHE)
-			se->conn.capable |= FUSE_CAP_WRITEBACK_CACHE;
+			se->conn.capable_ext |= FUSE_CAP_WRITEBACK_CACHE;
 		if (inargflags & FUSE_NO_OPEN_SUPPORT)
-			se->conn.capable |= FUSE_CAP_NO_OPEN_SUPPORT;
+			se->conn.capable_ext |= FUSE_CAP_NO_OPEN_SUPPORT;
 		if (inargflags & FUSE_PARALLEL_DIROPS)
-			se->conn.capable |= FUSE_CAP_PARALLEL_DIROPS;
+			se->conn.capable_ext |= FUSE_CAP_PARALLEL_DIROPS;
 		if (inargflags & FUSE_POSIX_ACL)
-			se->conn.capable |= FUSE_CAP_POSIX_ACL;
+			se->conn.capable_ext |= FUSE_CAP_POSIX_ACL;
 		if (inargflags & FUSE_HANDLE_KILLPRIV)
-			se->conn.capable |= FUSE_CAP_HANDLE_KILLPRIV;
+			se->conn.capable_ext |= FUSE_CAP_HANDLE_KILLPRIV;
 		if (inargflags & FUSE_HANDLE_KILLPRIV_V2)
-			se->conn.capable |= FUSE_CAP_HANDLE_KILLPRIV_V2;
+			se->conn.capable_ext |= FUSE_CAP_HANDLE_KILLPRIV_V2;
 		if (inargflags & FUSE_CACHE_SYMLINKS)
-			se->conn.capable |= FUSE_CAP_CACHE_SYMLINKS;
+			se->conn.capable_ext |= FUSE_CAP_CACHE_SYMLINKS;
 		if (inargflags & FUSE_NO_OPENDIR_SUPPORT)
-			se->conn.capable |= FUSE_CAP_NO_OPENDIR_SUPPORT;
+			se->conn.capable_ext |= FUSE_CAP_NO_OPENDIR_SUPPORT;
 		if (inargflags & FUSE_EXPLICIT_INVAL_DATA)
-			se->conn.capable |= FUSE_CAP_EXPLICIT_INVAL_DATA;
+			se->conn.capable_ext |= FUSE_CAP_EXPLICIT_INVAL_DATA;
 		if (inargflags & FUSE_SETXATTR_EXT)
-			se->conn.capable |= FUSE_CAP_SETXATTR_EXT;
+			se->conn.capable_ext |= FUSE_CAP_SETXATTR_EXT;
 		if (!(inargflags & FUSE_MAX_PAGES)) {
 			size_t max_bufsize =
 				FUSE_DEFAULT_MAX_PAGES_PER_REQ * getpagesize()
@@ -2098,13 +2117,13 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 			buf_reallocable = false;
 		}
 		if (inargflags & FUSE_DIRECT_IO_ALLOW_MMAP)
-			se->conn.capable |= FUSE_CAP_DIRECT_IO_ALLOW_MMAP;
+			se->conn.capable_ext |= FUSE_CAP_DIRECT_IO_ALLOW_MMAP;
 		if (arg->minor >= 38 || (inargflags & FUSE_HAS_EXPIRE_ONLY))
-			se->conn.capable |= FUSE_CAP_EXPIRE_ONLY;
+			se->conn.capable_ext |= FUSE_CAP_EXPIRE_ONLY;
 		if (inargflags & FUSE_PASSTHROUGH)
-			se->conn.capable |= FUSE_CAP_PASSTHROUGH;
+			se->conn.capable_ext |= FUSE_CAP_PASSTHROUGH;
 		if (inargflags & FUSE_NO_EXPORT_SUPPORT)
-			se->conn.capable |= FUSE_CAP_NO_EXPORT_SUPPORT;
+			se->conn.capable_ext |= FUSE_CAP_NO_EXPORT_SUPPORT;
 	} else {
 		se->conn.max_readahead = 0;
 	}
@@ -2113,16 +2132,17 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 #ifdef HAVE_SPLICE
 #ifdef HAVE_VMSPLICE
 		if ((se->io == NULL) || (se->io->splice_send != NULL)) {
-			se->conn.capable |= FUSE_CAP_SPLICE_WRITE | FUSE_CAP_SPLICE_MOVE;
+			se->conn.capable_ext |= FUSE_CAP_SPLICE_WRITE |
+						FUSE_CAP_SPLICE_MOVE;
 		}
 #endif
 		if ((se->io == NULL) || (se->io->splice_receive != NULL)) {
-			se->conn.capable |= FUSE_CAP_SPLICE_READ;
+			se->conn.capable_ext |= FUSE_CAP_SPLICE_READ;
 		}
 #endif
 	}
 	if (se->conn.proto_minor >= 18)
-		se->conn.capable |= FUSE_CAP_IOCTL_DIR;
+		se->conn.capable_ext |= FUSE_CAP_IOCTL_DIR;
 
 	/* Default settings for modern filesystems.
 	 *
@@ -2131,9 +2151,10 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	 * we can finally enable them by default (as long as they're
 	 * supported by the kernel).
 	 */
-#define LL_SET_DEFAULT(cond, cap) \
-	if ((cond) && (se->conn.capable & (cap))) \
-		se->conn.want |= (cap)
+#define LL_SET_DEFAULT(cond, cap)                     \
+	if ((cond)) \
+		fuse_set_feature_flag(&se->conn, cap)
+
 	LL_SET_DEFAULT(1, FUSE_CAP_ASYNC_READ);
 	LL_SET_DEFAULT(1, FUSE_CAP_AUTO_INVAL_DATA);
 	LL_SET_DEFAULT(1, FUSE_CAP_ASYNC_DIO);
@@ -2155,10 +2176,31 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	se->conn.time_gran = 1;
 
 	se->got_init = 1;
-	if (se->op.init)
+	if (se->op.init) {
+		uint64_t want_ext_default = se->conn.want_ext;
+		int rc;
+
+		// Apply the first 32 bits of capable_ext to capable
+		se->conn.capable =
+			(uint32_t)(se->conn.capable_ext & 0xFFFFFFFF);
+
 		se->op.init(se->userdata, &se->conn);
 
-	if (!want_flags_valid(se->conn.capable, se->conn.want)) {
+		/*
+		 * se->conn.want is 32-bit value and deprecated in favour of
+		 * se->conn.want_ext
+		 * Userspace might still use conn.want - we need to convert it
+		 */
+		rc = convert_to_conn_want_ext(&se->conn, want_ext_default);
+		if (rc != 0) {
+			fuse_reply_err(req, EPROTO);
+			se->error = -EPROTO;
+			fuse_session_exit(se);
+			return;
+		}
+	}
+
+	if (!want_flags_valid(se->conn.capable_ext, se->conn.want_ext)) {
 		fuse_reply_err(req, EPROTO);
 		se->error = -EPROTO;
 		fuse_session_exit(se);
@@ -2197,45 +2239,45 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	   by the max_write option */
 	outargflags |= FUSE_BIG_WRITES;
 
-	if (se->conn.want & FUSE_CAP_ASYNC_READ)
+	if (se->conn.want_ext & FUSE_CAP_ASYNC_READ)
 		outargflags |= FUSE_ASYNC_READ;
-	if (se->conn.want & FUSE_CAP_POSIX_LOCKS)
+	if (se->conn.want_ext & FUSE_CAP_POSIX_LOCKS)
 		outargflags |= FUSE_POSIX_LOCKS;
-	if (se->conn.want & FUSE_CAP_ATOMIC_O_TRUNC)
+	if (se->conn.want_ext & FUSE_CAP_ATOMIC_O_TRUNC)
 		outargflags |= FUSE_ATOMIC_O_TRUNC;
-	if (se->conn.want & FUSE_CAP_EXPORT_SUPPORT)
+	if (se->conn.want_ext & FUSE_CAP_EXPORT_SUPPORT)
 		outargflags |= FUSE_EXPORT_SUPPORT;
-	if (se->conn.want & FUSE_CAP_DONT_MASK)
+	if (se->conn.want_ext & FUSE_CAP_DONT_MASK)
 		outargflags |= FUSE_DONT_MASK;
-	if (se->conn.want & FUSE_CAP_FLOCK_LOCKS)
+	if (se->conn.want_ext & FUSE_CAP_FLOCK_LOCKS)
 		outargflags |= FUSE_FLOCK_LOCKS;
-	if (se->conn.want & FUSE_CAP_AUTO_INVAL_DATA)
+	if (se->conn.want_ext & FUSE_CAP_AUTO_INVAL_DATA)
 		outargflags |= FUSE_AUTO_INVAL_DATA;
-	if (se->conn.want & FUSE_CAP_READDIRPLUS)
+	if (se->conn.want_ext & FUSE_CAP_READDIRPLUS)
 		outargflags |= FUSE_DO_READDIRPLUS;
-	if (se->conn.want & FUSE_CAP_READDIRPLUS_AUTO)
+	if (se->conn.want_ext & FUSE_CAP_READDIRPLUS_AUTO)
 		outargflags |= FUSE_READDIRPLUS_AUTO;
-	if (se->conn.want & FUSE_CAP_ASYNC_DIO)
+	if (se->conn.want_ext & FUSE_CAP_ASYNC_DIO)
 		outargflags |= FUSE_ASYNC_DIO;
-	if (se->conn.want & FUSE_CAP_WRITEBACK_CACHE)
+	if (se->conn.want_ext & FUSE_CAP_WRITEBACK_CACHE)
 		outargflags |= FUSE_WRITEBACK_CACHE;
-	if (se->conn.want & FUSE_CAP_PARALLEL_DIROPS)
+	if (se->conn.want_ext & FUSE_CAP_PARALLEL_DIROPS)
 		outargflags |= FUSE_PARALLEL_DIROPS;
-	if (se->conn.want & FUSE_CAP_POSIX_ACL)
+	if (se->conn.want_ext & FUSE_CAP_POSIX_ACL)
 		outargflags |= FUSE_POSIX_ACL;
-	if (se->conn.want & FUSE_CAP_HANDLE_KILLPRIV)
+	if (se->conn.want_ext & FUSE_CAP_HANDLE_KILLPRIV)
 		outargflags |= FUSE_HANDLE_KILLPRIV;
-	if (se->conn.want & FUSE_CAP_HANDLE_KILLPRIV_V2)
+	if (se->conn.want_ext & FUSE_CAP_HANDLE_KILLPRIV_V2)
 		outargflags |= FUSE_HANDLE_KILLPRIV_V2;
-	if (se->conn.want & FUSE_CAP_CACHE_SYMLINKS)
+	if (se->conn.want_ext & FUSE_CAP_CACHE_SYMLINKS)
 		outargflags |= FUSE_CACHE_SYMLINKS;
-	if (se->conn.want & FUSE_CAP_EXPLICIT_INVAL_DATA)
+	if (se->conn.want_ext & FUSE_CAP_EXPLICIT_INVAL_DATA)
 		outargflags |= FUSE_EXPLICIT_INVAL_DATA;
-	if (se->conn.want & FUSE_CAP_SETXATTR_EXT)
+	if (se->conn.want_ext & FUSE_CAP_SETXATTR_EXT)
 		outargflags |= FUSE_SETXATTR_EXT;
-	if (se->conn.want & FUSE_CAP_DIRECT_IO_ALLOW_MMAP)
+	if (se->conn.want_ext & FUSE_CAP_DIRECT_IO_ALLOW_MMAP)
 		outargflags |= FUSE_DIRECT_IO_ALLOW_MMAP;
-	if (se->conn.want & FUSE_CAP_PASSTHROUGH) {
+	if (se->conn.want_ext & FUSE_CAP_PASSTHROUGH) {
 		outargflags |= FUSE_PASSTHROUGH;
 		/*
 		 * outarg.max_stack_depth includes the fuse stack layer,
@@ -2243,7 +2285,7 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 		 */
 		outarg.max_stack_depth = se->conn.max_backing_stack_depth + 1;
 	}
-	if (se->conn.want & FUSE_CAP_NO_EXPORT_SUPPORT)
+	if (se->conn.want_ext & FUSE_CAP_NO_EXPORT_SUPPORT)
 		outargflags |= FUSE_NO_EXPORT_SUPPORT;
 
 	if (inargflags & FUSE_INIT_EXT) {
@@ -2283,7 +2325,7 @@ void do_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 			outarg.congestion_threshold);
 		fuse_log(FUSE_LOG_DEBUG, "   time_gran=%u\n",
 			outarg.time_gran);
-		if (se->conn.want & FUSE_CAP_PASSTHROUGH)
+		if (se->conn.want_ext & FUSE_CAP_PASSTHROUGH)
 			fuse_log(FUSE_LOG_DEBUG, "   max_stack_depth=%u\n",
 				outarg.max_stack_depth);
 	}
@@ -2468,7 +2510,7 @@ int fuse_lowlevel_notify_expire_entry(struct fuse_session *se, fuse_ino_t parent
 	if (!se)
 		return -EINVAL;
 
-	if (!(se->conn.capable & FUSE_CAP_EXPIRE_ONLY))
+	if (!(se->conn.capable_ext & FUSE_CAP_EXPIRE_ONLY))
 		return -ENOSYS;
 
 	return fuse_lowlevel_notify_entry(se, parent, name, namelen, FUSE_LL_EXPIRE_ONLY);
@@ -2713,7 +2755,12 @@ static struct {
 	[CUSE_INIT]	   = { cuse_lowlevel_init, "CUSE_INIT"   },
 };
 
-#define FUSE_MAXOP (sizeof(fuse_ll_ops) / sizeof(fuse_ll_ops[0]))
+/*
+ * For ABI compatibility we cannot allow higher values than CUSE_INIT.
+ * Without ABI compatibility we could use the size of the array.
+ * #define FUSE_MAXOP (sizeof(fuse_ll_ops) / sizeof(fuse_ll_ops[0]))
+ */
+#define FUSE_MAXOP (CUSE_INIT + 1)
 
 static const char *opname(enum fuse_opcode opcode)
 {
@@ -2741,10 +2788,11 @@ static int fuse_ll_copy_from_pipe(struct fuse_bufvec *dst,
 void fuse_session_process_buf(struct fuse_session *se,
 			      const struct fuse_buf *buf)
 {
-	fuse_session_process_buf_int(se, buf, NULL);
+	fuse_session_process_buf_internal(se, buf, NULL);
 }
 
-void fuse_session_process_buf_int(struct fuse_session *se,
+/* libfuse internal handler */
+void fuse_session_process_buf_internal(struct fuse_session *se,
 				  const struct fuse_buf *buf, struct fuse_chan *ch)
 {
 	const size_t write_header_size = sizeof(struct fuse_in_header) +
@@ -2946,13 +2994,52 @@ static void fuse_ll_pipe_destructor(void *data)
 	fuse_ll_pipe_free(llp);
 }
 
-int fuse_session_receive_buf(struct fuse_session *se, struct fuse_buf *buf)
+void fuse_buf_free(struct fuse_buf *buf)
 {
-	return fuse_session_receive_buf_int(se, buf, NULL);
+	if (buf->mem == NULL)
+		return;
+
+	size_t write_header_sz =
+		sizeof(struct fuse_in_header) + sizeof(struct fuse_write_in);
+
+	char *ptr = (char *)buf->mem - pagesize + write_header_sz;
+	free(ptr);
+	buf->mem = NULL;
 }
 
-int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
-				 struct fuse_chan *ch)
+/*
+ * This is used to allocate buffers that hold fuse requests
+ */
+static void *buf_alloc(size_t size, bool internal)
+{
+	/*
+	 * For libfuse internal caller add in alignment. That cannot be done
+	 * for an external caller, as it is not guaranteed that the external
+	 * caller frees the raw pointer.
+	 */
+	if (internal) {
+		size_t write_header_sz = sizeof(struct fuse_in_header) +
+					 sizeof(struct fuse_write_in);
+		size_t new_size = ROUND_UP(size + write_header_sz, pagesize);
+
+		char *buf = aligned_alloc(pagesize, new_size);
+		if (buf == NULL)
+			return NULL;
+
+		buf += pagesize - write_header_sz;
+
+		return buf;
+	} else {
+		return malloc(size);
+	}
+}
+
+/*
+ *@param internal true if called from libfuse internal code
+ */
+static int _fuse_session_receive_buf(struct fuse_session *se,
+				     struct fuse_buf *buf, struct fuse_chan *ch,
+				     bool internal)
 {
 	int err;
 	ssize_t res;
@@ -2961,7 +3048,8 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 	struct fuse_ll_pipe *llp;
 	struct fuse_buf tmpbuf;
 
-	if (se->conn.proto_minor < 14 || !(se->conn.want & FUSE_CAP_SPLICE_READ))
+	if (se->conn.proto_minor < 14 ||
+	    !(se->conn.want_ext & FUSE_CAP_SPLICE_READ))
 		goto fallback;
 
 	llp = fuse_ll_get_pipe(se);
@@ -2986,11 +3074,11 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 
 	if (se->io != NULL && se->io->splice_receive != NULL) {
 		res = se->io->splice_receive(ch ? ch->fd : se->fd, NULL,
-						     llp->pipe[1], NULL, bufsize, 0,
-						     se->userdata);
+					     llp->pipe[1], NULL, bufsize, 0,
+					     se->userdata);
 	} else {
 		res = splice(ch ? ch->fd : se->fd, NULL, llp->pipe[1], NULL,
-				 bufsize, 0);
+			     bufsize, 0);
 	}
 	err = errno;
 
@@ -3014,7 +3102,7 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 		return -EIO;
 	}
 
-	tmpbuf = (struct fuse_buf) {
+	tmpbuf = (struct fuse_buf){
 		.size = res,
 		.flags = FUSE_BUF_IS_FD,
 		.fd = llp->pipe[0],
@@ -3025,20 +3113,22 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 	 * fuse_loop_mt() needs to check for FORGET so this more than
 	 * just an optimization.
 	 */
-	if (res < sizeof(struct fuse_in_header) +
-	    sizeof(struct fuse_write_in) + pagesize) {
+	if (res < sizeof(struct fuse_in_header) + sizeof(struct fuse_write_in) +
+			  pagesize) {
 		struct fuse_bufvec src = { .buf[0] = tmpbuf, .count = 1 };
 		struct fuse_bufvec dst = { .count = 1 };
 
 		if (!buf->mem) {
-			buf->mem = malloc(se->bufsize);
+			buf->mem = buf_alloc(se->bufsize, internal);
 			if (!buf->mem) {
-				fuse_log(FUSE_LOG_ERR,
+				fuse_log(
+					FUSE_LOG_ERR,
 					"fuse: failed to allocate read buffer\n");
 				return -ENOMEM;
 			}
 			buf->mem_size = se->bufsize;
-			se->buf_reallocable = true;
+			if (internal)
+				se->buf_reallocable = true;
 		}
 		buf->size = se->bufsize;
 		buf->flags = 0;
@@ -3047,12 +3137,13 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 		res = fuse_buf_copy(&dst, &src, 0);
 		if (res < 0) {
 			fuse_log(FUSE_LOG_ERR, "fuse: copy from pipe: %s\n",
-				strerror(-res));
+				 strerror(-res));
 			fuse_ll_clear_pipe(se);
 			return res;
 		}
 		if (res < tmpbuf.size) {
-			fuse_log(FUSE_LOG_ERR, "fuse: copy from pipe: short read\n");
+			fuse_log(FUSE_LOG_ERR,
+				 "fuse: copy from pipe: short read\n");
 			fuse_ll_clear_pipe(se);
 			return -EIO;
 		}
@@ -3070,24 +3161,25 @@ int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
 fallback:
 #endif
 	if (!buf->mem) {
-		buf->mem = malloc(se->bufsize);
+		buf->mem = buf_alloc(se->bufsize, internal);
 		if (!buf->mem) {
 			fuse_log(FUSE_LOG_ERR,
-				"fuse: failed to allocate read buffer\n");
+				 "fuse: failed to allocate read buffer\n");
 			return -ENOMEM;
 		}
 		buf->mem_size = se->bufsize;
-		se->buf_reallocable = true;
+		if (internal)
+			se->buf_reallocable = true;
 	}
 
 restart:
 	if (se->buf_reallocable)
-	    bufsize = buf->mem_size;
+		bufsize = buf->mem_size;
 	if (se->io != NULL) {
 		/* se->io->read is never NULL if se->io is not NULL as
 		specified by fuse_session_custom_io()*/
 		res = se->io->read(ch ? ch->fd : se->fd, buf->mem, bufsize,
-					 se->userdata);
+				   se->userdata);
 	} else {
 		res = read(ch ? ch->fd : se->fd, buf->mem, bufsize);
 	}
@@ -3096,18 +3188,20 @@ restart:
 	if (fuse_session_exited(se))
 		return 0;
 	if (res == -1) {
-		if (err == EINVAL && se->buf_reallocable && se->bufsize > buf->mem_size)  {
-		    void *newbuf  = malloc(se->bufsize);
-		    if (!newbuf) {
-			fuse_log(FUSE_LOG_ERR,
-				"fuse: failed to (re)allocate read buffer\n");
-			return -ENOMEM;
-		    }
-		    free(buf->mem);
-		    buf->mem = newbuf;
-		    buf->mem_size = se->bufsize;
-		    se->buf_reallocable = true;
-		    goto restart;
+		if (err == EINVAL && se->buf_reallocable &&
+		    se->bufsize > buf->mem_size) {
+			void *newbuf = buf_alloc(se->bufsize, internal);
+			if (!newbuf) {
+				fuse_log(
+					FUSE_LOG_ERR,
+					"fuse: failed to (re)allocate read buffer\n");
+				return -ENOMEM;
+			}
+			fuse_buf_free(buf);
+			buf->mem = newbuf;
+			buf->mem_size = se->bufsize;
+			se->buf_reallocable = true;
+			goto restart;
 		}
 
 		/* ENOENT means the operation was interrupted, it's safe
@@ -3128,7 +3222,7 @@ restart:
 			perror("fuse: reading device");
 		return -err;
 	}
-	if ((size_t) res < sizeof(struct fuse_in_header)) {
+	if ((size_t)res < sizeof(struct fuse_in_header)) {
 		fuse_log(FUSE_LOG_ERR, "short read on fuse device\n");
 		return -EIO;
 	}
@@ -3138,12 +3232,30 @@ restart:
 	return res;
 }
 
+int fuse_session_receive_buf(struct fuse_session *se, struct fuse_buf *buf)
+{
+	return _fuse_session_receive_buf(se, buf, NULL, false);
+}
+
+/* libfuse internal handler */
+int fuse_session_receive_buf_internal(struct fuse_session *se,
+				      struct fuse_buf *buf,
+				      struct fuse_chan *ch)
+{
+	return _fuse_session_receive_buf(se, buf, ch, true);
+}
+
 FUSE_SYMVER("_fuse_session_new_317", "_fuse_session_new@@FUSE_3.17")
 struct fuse_session *_fuse_session_new_317(struct fuse_args *args,
-					  const struct fuse_lowlevel_ops *op,
-					  size_t op_size,
-					  struct libfuse_version *version,
-					  void *userdata)
+					   const struct fuse_lowlevel_ops *op,
+					   size_t op_size,
+					   struct libfuse_version *version,
+					   void *userdata);
+struct fuse_session *_fuse_session_new_317(struct fuse_args *args,
+					   const struct fuse_lowlevel_ops *op,
+					   size_t op_size,
+					   struct libfuse_version *version,
+					   void *userdata)
 {
 	int err;
 	struct fuse_session *se;
