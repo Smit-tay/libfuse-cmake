@@ -1427,6 +1427,8 @@ int fuse_reply_readlink(fuse_req_t req, const char *link);
 /**
  * Setup passthrough backing file for open reply
  *
+ * Currently there should be only one backing id per node / backing file.
+ *
  * Possible requests:
  *   open, opendir, create
  *
@@ -2047,6 +2049,12 @@ int fuse_parse_cmdline_312(struct fuse_args *args,
 #endif
 #endif
 
+/* Do not call this directly, use fuse_session_new() instead */
+struct fuse_session *
+fuse_session_new_versioned(struct fuse_args *args,
+			   const struct fuse_lowlevel_ops *op, size_t op_size,
+			   struct libfuse_version *version, void *userdata);
+
 /**
  * Create a low level session.
  *
@@ -2085,12 +2093,6 @@ fuse_session_new_fn(struct fuse_args *args, const struct fuse_lowlevel_ops *op,
 		.hotfix = FUSE_HOTFIX_VERSION,
 		.padding = 0
 	};
-
-	/* not declared globally, to restrict usage of this function */
-	struct fuse_session *fuse_session_new_versioned(
-		struct fuse_args *args, const struct fuse_lowlevel_ops *op,
-		size_t op_size, struct libfuse_version *version,
-		void *userdata);
 
 	return fuse_session_new_versioned(args, op, op_size, &version,
 					  userdata);

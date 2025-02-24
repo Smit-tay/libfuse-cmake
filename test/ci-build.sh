@@ -81,7 +81,7 @@ sanitized_build()
 
     meson setup -Dprefix=${PREFIX_DIR} -D werror=true\
            "${SOURCE_DIR}" \
-           || (ct meson-logs/meson-log.txt; false)
+           || (cat meson-logs/meson-log.txt; false)
     meson configure $SAN
 
     # b_lundef=false is required to work around clang
@@ -117,6 +117,23 @@ sanitized_build()
     rm -fr build-san
     sudo rm -fr ${PREFIX_DIR}
 )
+
+# 32-bit sanitized build
+export CC=clang
+export CXX=clang++
+export CFLAGS="-m32"
+export CXXFLAGS="-m32"
+export LDFLAGS="-m32"
+export PKG_CONFIG_PATH="/usr/lib/i386-linux-gnu/pkgconfig"
+TEST_WITH_VALGRIND=false
+sanitized_build
+unset CFLAGS
+unset CXXFLAGS
+unset LDFLAGS
+unset PKG_CONFIG_PATH
+unset TEST_WITH_VALGRIND
+unset CC
+unset CXX
 
 # Sanitized build
 export CC=clang
