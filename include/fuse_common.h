@@ -525,14 +525,6 @@ enum fuse_capability {
 };
 
 /**
- * Indicates that the file system cannot handle NFS export
- *
- * If this flag is set NFS export and name_to_handle_at
- * is not going to work at all and will fail with EOPNOTSUPP.
- */
-#define FUSE_CAP_NO_EXPORT_SUPPORT  (1 << 30)
-
-/**
  * Ioctl flags
  *
  * FUSE_IOCTL_COMPAT: 32bit compat ioctl on 64bit machine

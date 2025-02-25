@@ -167,11 +167,18 @@ set(COMPILE_ME [=[
             return 100; //printf("no need to escape\n");
     }
 ]=])
+
+set(TEST_FILE "${CMAKE_BINARY_DIR}/compile_me.c")
+
+# Write the C code to the file
+file(WRITE ${TEST_FILE} "${COMPILE_ME}")
+
 message(STATUS "Performing Test GETMNTENT_ESCAPING")
 try_run(
 	RUN_RESULT
 	COMPILE_RESULT
-	SOURCE_FROM_VAR "compile_me.cpp" COMPILE_ME
+	${CMAKE_BINARY_DIR}  # Binary Directory
+    ${TEST_FILE}         # Source File
 	LINK_OPTIONS -lmount
 	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 	COMPILE_OUTPUT_VARIABLE COMPILE_OUT_TXT

@@ -209,7 +209,6 @@ def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
     else:
         umount(mount_process, mnt_dir)
 
-##@pytest.mark.skip
 @pytest.mark.parametrize("cache", (False, True))
 def test_passthrough_hp(short_tmpdir, cache, output_checker):
     mnt_dir = str(short_tmpdir.mkdir('mnt'))
@@ -358,7 +357,6 @@ def test_null(tmpdir, output_checker):
         umount(mount_process, mnt_file)
 
 
-##@pytest.mark.skip(reason='Failing test - inadequately documented, unable debug!')
 @pytest.mark.skipif(fuse_proto < (7,12),
                     reason='not supported by running kernel')
 @pytest.mark.parametrize("only_expire", ("invalidate_entries", "expire_entries"))
