@@ -54,8 +54,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_compile_options("-Dlinux=1"
                     "-D_REENTRANT" "-DHAVE_CONFIG_H" "-D_GNU_SOURCE"
                     "-Wall" "-Wextra"
-                    "-Wmissing-declarations" "-Wno-sign-compare" "-Wstrict-prototypes" "-Wwrite-strings"
+                    "-Wmissing-declarations" "-Wno-sign-compare" "-Wwrite-strings"
                     "-fno-strict-aliasing")
+# C-specific compile options
+# Apply these only to C targets or files
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wstrict-prototypes")                 
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)
@@ -98,6 +101,7 @@ check_symbol_exists("fdatasync"       ${include_default}    HAVE_FDATASYNC)
 check_symbol_exists("utimensat"       ${include_default}    HAVE_UTIMENSAT)
 check_symbol_exists("copy_file_range" ${include_default}    HAVE_COPY_FILE_RANGE)
 check_symbol_exists("fallocate"       ${include_default}    HAVE_FALLOCATE)
+check_symbol_exists("close_range"     ${include_default}    HAVE_CLOSE_RANGE)
 # For some reason the meson build checks these separately
 check_symbol_exists("setxattr" "sys/xattr.h" HAVE_SETXATTR)
 check_symbol_exists("iconv" "iconv.h" HAVE_ICONV)

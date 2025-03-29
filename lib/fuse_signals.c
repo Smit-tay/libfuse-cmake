@@ -28,7 +28,9 @@ static int fail_sigs[] = { SIGILL, SIGTRAP, SIGABRT, SIGBUS, SIGFPE, SIGSEGV };
 static struct fuse_session *fuse_instance;
 
 #define BT_STACK_SZ (1024 * 1024)
+#ifdef HAVE_BACKTRACE  // Avoid unused variable if not available
 static void *backtrace_buffer[BT_STACK_SZ];
+#endif
 
 static void dump_stack(void)
 {

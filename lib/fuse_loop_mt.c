@@ -34,15 +34,14 @@
 /* Environment var controlling the thread stack size */
 #define ENVNAME_THREAD_STACK "FUSE_THREAD_STACK"
 
-#define FUSE_LOOP_MT_V2_IDENTIFIER INT_MAX - 2
-#define FUSE_LOOP_MT_DEF_CLONE_FD 0
+#define FUSE_LOOP_MT_V2_IDENTIFIER	 INT_MAX - 2
+#define FUSE_LOOP_MT_DEF_CLONE_FD	 0
 #define FUSE_LOOP_MT_DEF_MAX_THREADS 10
-#define FUSE_LOOP_MT_DEF_IDLE_THREADS \
-	-1 /* thread destruction is disabled
+#define FUSE_LOOP_MT_DEF_IDLE_THREADS -1 /* thread destruction is disabled
                                           * by default */
 
 /* an arbitrary large value that cannot be valid */
-#define FUSE_LOOP_MT_MAX_THREADS (100U * 1000)
+#define FUSE_LOOP_MT_MAX_THREADS      (100U * 1000)
 
 struct fuse_worker {
 	struct fuse_worker *prev;
@@ -72,7 +71,7 @@ struct fuse_mt {
 
 static struct fuse_chan *fuse_chan_new(int fd)
 {
-	struct fuse_chan *ch = (struct fuse_chan *)malloc(sizeof(*ch));
+	struct fuse_chan *ch = (struct fuse_chan *) malloc(sizeof(*ch));
 	if (ch == NULL) {
 		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate channel\n");
 		return NULL;
@@ -132,7 +131,7 @@ static int fuse_loop_start_thread(struct fuse_mt *mt);
 
 static void *fuse_do_work(void *data)
 {
-	struct fuse_worker *w = (struct fuse_worker *)data;
+	struct fuse_worker *w = (struct fuse_worker *) data;
 	struct fuse_mt *mt = w->mt;
 
 	pthread_setname_np(pthread_self(), "fuse_worker");
@@ -191,8 +190,7 @@ static void *fuse_do_work(void *data)
 		 * is indeed a good reason to destruct threads it should be done
 		 * delayed, a moving average might be useful for that.
 		 */
-		if (mt->max_idle != -1 && mt->numavail > mt->max_idle &&
-		    mt->numworker > 1) {
+		if (mt->max_idle != -1 && mt->numavail > mt->max_idle && mt->numworker > 1) {
 			if (mt->exit) {
 				pthread_mutex_unlock(&mt->lock);
 				return NULL;
@@ -238,8 +236,8 @@ int fuse_start_thread(pthread_t *thread_id, void *(*func)(void *), void *arg)
 			fuse_log(FUSE_LOG_ERR, "fuse: invalid stack size: %s\n",
 				 stack_size);
 		else if (pthread_attr_setstacksize(&attr, size))
-			fuse_log(FUSE_LOG_ERR,
-				 "fuse: could not set stack size: %ld\n", size);
+			fuse_log(FUSE_LOG_ERR, "fuse: could not set stack size: %ld\n",
+				 size);
 	}
 
 	/* Disallow signal reception in worker threads */
@@ -254,7 +252,7 @@ int fuse_start_thread(pthread_t *thread_id, void *(*func)(void *), void *arg)
 	pthread_attr_destroy(&attr);
 	if (res != 0) {
 		fuse_log(FUSE_LOG_ERR, "fuse: error creating thread: %s\n",
-			 strerror(res));
+			strerror(res));
 		return -1;
 	}
 
@@ -274,7 +272,7 @@ static int fuse_clone_chan_fd_default(struct fuse_session *se)
 	clonefd = open(devname, O_RDWR | O_CLOEXEC);
 	if (clonefd == -1) {
 		fuse_log(FUSE_LOG_ERR, "fuse: failed to open %s: %s\n", devname,
-			 strerror(errno));
+			strerror(errno));
 		return -1;
 	}
 #ifndef O_CLOEXEC
@@ -285,7 +283,7 @@ static int fuse_clone_chan_fd_default(struct fuse_session *se)
 	res = ioctl(clonefd, FUSE_DEV_IOC_CLONE, &masterfd);
 	if (res == -1) {
 		fuse_log(FUSE_LOG_ERR, "fuse: failed to clone device fd: %s\n",
-			 strerror(errno));
+			strerror(errno));
 		close(clonefd);
 		return -1;
 	}
@@ -322,8 +320,7 @@ static int fuse_loop_start_thread(struct fuse_mt *mt)
 
 	struct fuse_worker *w = malloc(sizeof(struct fuse_worker));
 	if (!w) {
-		fuse_log(FUSE_LOG_ERR,
-			 "fuse: failed to allocate worker structure\n");
+		fuse_log(FUSE_LOG_ERR, "fuse: failed to allocate worker structure\n");
 		return -1;
 	}
 	memset(w, 0, sizeof(struct fuse_worker));
@@ -333,10 +330,10 @@ static int fuse_loop_start_thread(struct fuse_mt *mt)
 	w->ch = NULL;
 	if (mt->clone_fd) {
 		w->ch = fuse_clone_chan(mt);
-		if (!w->ch) {
+		if(!w->ch) {
 			/* Don't attempt this again */
 			fuse_log(FUSE_LOG_ERR, "fuse: trying to continue "
-					       "without -o clone_fd.\n");
+				"without -o clone_fd.\n");
 			mt->clone_fd = 0;
 		}
 	}
@@ -368,8 +365,7 @@ static void fuse_join_worker(struct fuse_mt *mt, struct fuse_worker *w)
 int fuse_session_loop_mt_312(struct fuse_session *se,
 			     struct fuse_loop_config *config);
 FUSE_SYMVER("fuse_session_loop_mt_312", "fuse_session_loop_mt@@FUSE_3.12")
-int fuse_session_loop_mt_312(struct fuse_session *se,
-			     struct fuse_loop_config *config)
+int fuse_session_loop_mt_312(struct fuse_session *se, struct fuse_loop_config *config)
 {
 	int err;
 	struct fuse_mt mt;
@@ -421,7 +417,7 @@ int fuse_session_loop_mt_312(struct fuse_session *se,
 
 	pthread_mutex_destroy(&mt.lock);
 	sem_destroy(&mt.finish);
-	if (se->error != 0)
+	if(se->error != 0)
 		err = se->error;
 	fuse_session_reset(se);
 
@@ -433,11 +429,9 @@ int fuse_session_loop_mt_312(struct fuse_session *se,
 	return err;
 }
 
-int fuse_session_loop_mt_32(struct fuse_session *se,
-			    struct fuse_loop_config_v1 *config_v1);
+int fuse_session_loop_mt_32(struct fuse_session *se, struct fuse_loop_config_v1 *config_v1);
 FUSE_SYMVER("fuse_session_loop_mt_32", "fuse_session_loop_mt@FUSE_3.2")
-int fuse_session_loop_mt_32(struct fuse_session *se,
-			    struct fuse_loop_config_v1 *config_v1)
+int fuse_session_loop_mt_32(struct fuse_session *se, struct fuse_loop_config_v1 *config_v1)
 {
 	int err;
 	struct fuse_loop_config *config = NULL;
@@ -458,6 +452,7 @@ int fuse_session_loop_mt_32(struct fuse_session *se,
 	return err;
 }
 
+
 int fuse_session_loop_mt_31(struct fuse_session *se, int clone_fd);
 FUSE_SYMVER("fuse_session_loop_mt_31", "fuse_session_loop_mt@FUSE_3.0")
 int fuse_session_loop_mt_31(struct fuse_session *se, int clone_fd)
@@ -465,7 +460,7 @@ int fuse_session_loop_mt_31(struct fuse_session *se, int clone_fd)
 	int err;
 	struct fuse_loop_config *config = fuse_loop_cfg_create();
 	if (clone_fd > 0)
-		fuse_loop_cfg_set_clone_fd(config, clone_fd);
+		 fuse_loop_cfg_set_clone_fd(config, clone_fd);
 	err = fuse_session_loop_mt_312(se, config);
 
 	fuse_loop_cfg_destroy(config);
@@ -479,10 +474,10 @@ struct fuse_loop_config *fuse_loop_cfg_create(void)
 	if (config == NULL)
 		return NULL;
 
-	config->version_id = FUSE_LOOP_MT_V2_IDENTIFIER;
+	config->version_id       = FUSE_LOOP_MT_V2_IDENTIFIER;
 	config->max_idle_threads = FUSE_LOOP_MT_DEF_IDLE_THREADS;
-	config->max_threads = FUSE_LOOP_MT_DEF_MAX_THREADS;
-	config->clone_fd = FUSE_LOOP_MT_DEF_CLONE_FD;
+	config->max_threads      = FUSE_LOOP_MT_DEF_MAX_THREADS;
+	config->clone_fd         = FUSE_LOOP_MT_DEF_CLONE_FD;
 
 	return config;
 }
@@ -515,8 +510,8 @@ void fuse_loop_cfg_set_idle_threads(struct fuse_loop_config *config,
 		if (value != UINT_MAX)
 			fuse_log(FUSE_LOG_ERR,
 				 "Ignoring invalid max threads value "
-				 "%u > max (%u).\n",
-				 value, FUSE_LOOP_MT_MAX_THREADS);
+				 "%u > max (%u).\n", value,
+				 FUSE_LOOP_MT_MAX_THREADS);
 		return;
 	}
 	config->max_idle_threads = value;

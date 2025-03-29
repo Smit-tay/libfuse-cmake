@@ -34,6 +34,11 @@ target_sources(release_unlink_race PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/release_un
 target_include_directories(release_unlink_race PUBLIC ${INCLUDE_DIRS})
 target_link_libraries(release_unlink_race fuse3 ${CMAKE_THREAD_LIBS_INIT})
 
+add_executable(test_want_conversion)
+target_sources(test_want_conversion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_want_conversion.c)
+target_include_directories(test_want_conversion PUBLIC ${INCLUDE_DIRS})
+target_link_libraries(test_want_conversion fuse3 ${CMAKE_THREAD_LIBS_INIT})
+
 set(TEST_SCRIPTS conftest.py pytest.ini test_examples.py util.py test_ctests.py)
 
 add_custom_target(test_scripts)

@@ -59,7 +59,7 @@ Installation
 
 You can download libfuse from https://github.com/libfuse/libfuse/releases. To build and
 install, you must use [Meson](http://mesonbuild.com/) and
-[Ninja](https://ninja-build.org); or, [CMake](https:cmake.org). After downloading the tarball and `.sig` file, verify
+[Ninja](https://ninja-build.org).  After downloading the tarball and `.sig` file, verify
 it using [signify](https://www.openbsd.org/papers/bsdcan-signify.html):
 
     signify -V -m fuse-X.Y.Z.tar.gz -p fuse-X.Y.pub
