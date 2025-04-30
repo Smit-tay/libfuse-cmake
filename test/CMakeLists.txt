@@ -9,7 +9,7 @@ if( DEFINED NDEBUG )
 	message(WARNING "NDEBUG is defined, you will almost definitely experience problems")
 endif()
 
-# Duplicate target - and not really a meaningfull test
+# Duplicate target - and not really a meaningful test
 #add_executable( hello)
 #target_sources( hello PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/hello.c )
 #target_include_directories(hello PUBLIC ${INCLUDE_DIRS})
