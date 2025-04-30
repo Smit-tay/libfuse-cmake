@@ -1,5 +1,4 @@
 #include "util.h"
-#include <string.h>
 #ifdef FUSE_USE_VERSION
     #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
     #undef FUSE_USE_VERSION
@@ -10,6 +9,8 @@
 #include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
+#include <stdbool.h>
+#include <string.h>
 
 static void print_conn_info(const char *prefix, struct fuse_conn_info *conn)
 {
@@ -17,14 +18,21 @@ static void print_conn_info(const char *prefix, struct fuse_conn_info *conn)
 	       conn->want, conn->want_ext);
 }
 
-static void application_init(struct fuse_conn_info *conn)
+static void application_init_old_style(struct fuse_conn_info *conn)
 {
-	/* Simulate application init */
+	/* Simulate application init the old style */
 	conn->want |= FUSE_CAP_ASYNC_READ;
 	conn->want &= ~FUSE_CAP_SPLICE_READ;
 }
 
-static void test_fuse_fs_init(struct fuse_conn_info *conn)
+static void application_init_new_style(struct fuse_conn_info *conn)
+{
+	/* Simulate application init the new style */
+	fuse_set_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+	fuse_unset_feature_flag(conn, FUSE_CAP_SPLICE_READ);
+}
+
+static void test_fuse_fs_init(struct fuse_conn_info *conn, bool new_style)
 {
 	uint64_t want_ext_default = conn->want_ext;
 	uint32_t want_default = fuse_lower_32_bits(conn->want_ext);
@@ -35,23 +43,22 @@ static void test_fuse_fs_init(struct fuse_conn_info *conn)
 
 	conn->want = want_default;
 
-	application_init(conn);
+	if (new_style)
+		application_init_new_style(conn);
+	else
+		application_init_old_style(conn);
 
 	rc = convert_to_conn_want_ext(conn, want_ext_default, want_default);
 	assert(rc == 0);
-	if (rc != 0) {
-        // Handle the error (e.g., log it, abort, etc.)
-        fprintf(stderr, "Error in convert_to_conn_want_ext: %d\n", rc);
-        // Optionally exit or return early if this is critical
-    }
 }
 
-static void test_do_init(struct fuse_conn_info *conn)
+static void test_do_init(struct fuse_conn_info *conn, bool new_style)
 {
 	/* Initial setup */
 	conn->capable_ext = FUSE_CAP_SPLICE_READ | FUSE_CAP_SPLICE_WRITE |
 			    FUSE_CAP_SPLICE_MOVE | FUSE_CAP_POSIX_LOCKS |
-			    FUSE_CAP_FLOCK_LOCKS | FUSE_CAP_EXPORT_SUPPORT;
+			    FUSE_CAP_FLOCK_LOCKS | FUSE_CAP_EXPORT_SUPPORT |
+			    FUSE_CAP_ASYNC_READ;
 	conn->capable = fuse_lower_32_bits(conn->capable_ext);
 	conn->want_ext = conn->capable_ext;
 
@@ -64,15 +71,11 @@ static void test_do_init(struct fuse_conn_info *conn)
 	conn->want = want_default;
 	conn->capable = fuse_lower_32_bits(conn->capable_ext);
 
-	test_fuse_fs_init(conn);
+	test_fuse_fs_init(conn, new_style);
 
 	rc = convert_to_conn_want_ext(conn, want_ext_default, want_default);
 	assert(rc == 0);
-	if (rc != 0) {
-        // Handle the error (e.g., log it, abort, etc.)
-        fprintf(stderr, "Error in convert_to_conn_want_ext: %d\n", rc);
-        // Optionally exit or return early if this is critical
-    }
+
 	/* Verify all expected flags are set */
 	assert(!(conn->want_ext & FUSE_CAP_SPLICE_READ));
 	assert(conn->want_ext & FUSE_CAP_SPLICE_WRITE);
@@ -95,7 +98,8 @@ static void test_want_conversion_basic(void)
 	struct fuse_conn_info conn = { 0 };
 
 	printf("\nTesting basic want conversion:\n");
-	test_do_init(&conn);
+	test_do_init(&conn, false);
+	test_do_init(&conn, true);
 	print_conn_info("After init", &conn);
 }
 
@@ -127,11 +131,6 @@ static void test_want_conversion_conflict(void)
 	rc = convert_to_conn_want_ext(&conn, want_ext_default_ll,
 				      want_default_ll);
 	assert(rc == -EINVAL);
-	if (rc != 0) {
-        // Handle the error (e.g., log it, abort, etc.)
-        fprintf(stderr, "Error in convert_to_conn_want_ext: %d\n", rc);
-        // Optionally exit or return early if this is critical
-    }
 	print_conn_info("Test conflict after", &conn);
 
 	printf("Want conversion conflict test passed\n");
@@ -155,11 +154,6 @@ static void test_want_conversion_high_bits(void)
 	rc = convert_to_conn_want_ext(&conn, want_ext_default_ll,
 				      want_default_ll);
 	assert(rc == 0);
-	if (rc != 0) {
-        // Handle the error (e.g., log it, abort, etc.)
-        fprintf(stderr, "Error in convert_to_conn_want_ext: %d\n", rc);
-        // Optionally exit or return early if this is critical
-    }
 	assert(conn.want_ext == ((1ULL << 33) | FUSE_CAP_ASYNC_READ));
 	print_conn_info("Test high bits after", &conn);
 

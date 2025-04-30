@@ -7,9 +7,7 @@
 */
 /* This program does the mounting and unmounting of FUSE filesystems */
 
-#ifndef _GNU_SOURCE
-    #define _GNU_SOURCE
-#endif
+#define _GNU_SOURCE /* for clone,strchrnul and close_range */
 #include "fuse_config.h"
 #include "mount_util.h"
 #include "util.h"
@@ -38,11 +36,12 @@
 #include <stdbool.h>
 #include <sys/vfs.h>
 
-#ifdef HAVE_CLOSE_RANGE
+#ifdef HAVE_LINUX_CLOSE_RANGE_H
 #include <linux/close_range.h>
 #endif
 
 #define FUSE_COMMFD_ENV		"_FUSE_COMMFD"
+#define FUSE_KERN_DEVICE_ENV	"FUSE_KERN_DEVICE"
 
 #define FUSE_DEV "/dev/fuse"
 
@@ -1165,56 +1164,30 @@ static int check_perm(const char **mntp, struct stat *stbuf, int *mountpoint_fd)
 	return -1;
 }
 
-static int try_open(const char *dev, char **devp, int silent)
-{
-	int fd = open(dev, O_RDWR);
-	if (fd != -1) {
-		*devp = strdup(dev);
-		if (*devp == NULL) {
-			fprintf(stderr, "%s: failed to allocate memory\n",
-				progname);
-			close(fd);
-			fd = -1;
-		}
-	} else if (errno == ENODEV ||
-		   errno == ENOENT)/* check for ENOENT too, for the udev case */
-		return -2;
-	else if (!silent) {
-		fprintf(stderr, "%s: failed to open %s: %s\n", progname, dev,
-			strerror(errno));
-	}
-	return fd;
-}
-
-static int try_open_fuse_device(char **devp)
+static int open_fuse_device(const char *dev)
 {
 	int fd;
 
 	drop_privs();
-	fd = try_open(FUSE_DEV, devp, 0);
+	fd = open(dev, O_RDWR);
+	if (fd == -1) {
+		if (errno == ENODEV || errno == ENOENT)/* check for ENOENT too, for the udev case */
+			fprintf(stderr,
+				"%s: fuse device %s not found. Kernel module not loaded?\n",
+				progname, dev);
+		else
+			fprintf(stderr,
+				"%s: failed to open %s: %s\n", progname, dev, strerror(errno));
+	}
 	restore_privs();
 	return fd;
 }
-
-static int open_fuse_device(char **devp)
-{
-	int fd = try_open_fuse_device(devp);
-	if (fd >= -1)
-		return fd;
-
-	fprintf(stderr,
-		"%s: fuse device not found, try 'modprobe fuse' first\n",
-		progname);
-
-	return -1;
-}
-
 
 static int mount_fuse(const char *mnt, const char *opts, const char **type)
 {
 	int res;
 	int fd;
-	char *dev;
+	const char *dev = getenv(FUSE_KERN_DEVICE_ENV) ?: FUSE_DEV;
 	struct stat stbuf;
 	char *source = NULL;
 	char *mnt_opts = NULL;
@@ -1223,7 +1196,7 @@ static int mount_fuse(const char *mnt, const char *opts, const char **type)
 	char *do_mount_opts = NULL;
 	char *x_opts = NULL;
 
-	fd = open_fuse_device(&dev);
+	fd = open_fuse_device(dev);
 	if (fd == -1)
 		return -1;
 
@@ -1294,7 +1267,6 @@ static int mount_fuse(const char *mnt, const char *opts, const char **type)
 out_free:
 	free(source);
 	free(mnt_opts);
-	free(dev);
 	free(x_opts);
 	free(do_mount_opts);
 
@@ -1479,7 +1451,7 @@ static int close_inherited_fds(int cfd)
 	if (cfd <= STDERR_FILENO)
 		return -EINVAL;
 
-#ifdef HAVE_CLOSE_RANGE
+#ifdef HAVE_LINUX_CLOSE_RANGE_H
 	if (cfd < STDERR_FILENO + 2) {
 		close_range_loop(STDERR_FILENO + 1, cfd - 1, cfd);
 	} else {

@@ -9,6 +9,7 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 
 int libfuse_strtol(const char *str, long *res);
+void fuse_set_thread_name(unsigned long tid, const char *name);
 
 /**
  * Return the low bits of a number
@@ -27,7 +28,13 @@ static inline uint64_t fuse_higher_32_bits(uint64_t nr)
 }
 
 #ifndef FUSE_VAR_UNUSED
-#define FUSE_VAR_UNUSED(var) (__attribute__((unused)) var)
+#define FUSE_VAR_UNUSED __attribute__((__unused__))
 #endif
 
-#endif
+#define container_of(ptr, type, member)                      \
+	({                                                   \
+		unsigned long __mptr = (unsigned long)(ptr); \
+		((type *)(__mptr - offsetof(type, member))); \
+	})
+
+#endif /* FUSE_UTIL_H_ */
