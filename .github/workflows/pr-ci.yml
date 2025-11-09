@@ -38,5 +38,5 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - run: test/ci-build.sh
+      - run: test/ci-cmake_build.sh
 
