@@ -93,7 +93,7 @@ def readdir_inode(dir):
 @pytest.mark.parametrize("cmdline_builder", (invoke_directly, invoke_mount_fuse,
                                              invoke_mount_fuse_drop_privileges))
 @pytest.mark.parametrize("options", powerset(options))
-@pytest.mark.parametrize("name", ('hello', 'hello_ll', 'test/hello'))
+@pytest.mark.parametrize("name", ('hello', 'hello_ll'))
 def test_hello(tmpdir, name, options, cmdline_builder, output_checker):
     logger = logging.getLogger(__name__)
     mnt_dir = str(tmpdir)

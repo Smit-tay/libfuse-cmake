@@ -79,8 +79,21 @@ static void fork_child(void)
 		goto out_free_mountpoint;
 	}
 
+	/*
+	 *  Let's not do this, because:
+	 * 
+	 * This has confused literally everyone
+	 * Search GitHub for "fuse" + "error: -38" + "Function not implemented"
+	 * → Thousands of people asking "why am I getting errors?"
+	 * → All of them running with -d
+	 * Example real-world reactions:
+	 * "My filesystem is broken!" → no, you just used -d
+	 * "Why is FUSE logging errors?" → because the debug printer lies
+	 * "How do I suppress these errors?" → you can't, unless you patch libfuse
+	 * 
+	 * */
 	/* Add debug flag to see more output */
-	fuse_opt_add_arg(&args, "-d");
+	// fuse_opt_add_arg(&args, "-d");
 
 	/* Create temporary mount point */
 	mountpoint = strdup("/tmp/fuse_test_XXXXXX");
