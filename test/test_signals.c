@@ -5,9 +5,13 @@
  * Test for signal handling in libfuse.
  *
  * This program can be distributed under the terms of the GNU LGPLv2.
- * See the file COPYING.LIB
+ * See the file GPL2.txt
  */
 
+#ifdef FUSE_USE_VERSION
+    #define ORIG_FUSE_USE_VERSION FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+#endif
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 17)
 
 #include "fuse_config.h"
@@ -200,3 +204,9 @@ int main(void)
 	printf("SIGTERM handling test passed\n");
 	return 0;
 }
+
+#ifdef ORIG_FUSE_USE_VERSION
+    #undef FUSE_USE_VERSION
+    #define FUSE_USE_VERSION ORIG_FUSE_USE_VERSION
+    #undef ORIG_FUSE_USE_VERSION
+#endif

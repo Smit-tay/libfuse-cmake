@@ -3,7 +3,7 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB.
+  See the file LGPL2.txt.
 */
 
 #ifndef FUSE_H_
@@ -32,6 +32,9 @@ extern "C" {
 /* ----------------------------------------------------------- *
  * Basic FUSE API					       *
  * ----------------------------------------------------------- */
+
+/* Forward declaration */
+struct statx;
 
 /** Handle for a FUSE filesystem */
 struct fuse;
@@ -850,6 +853,17 @@ struct fuse_operations {
 	 * Find next data or hole after the specified offset
 	 */
 	off_t (*lseek) (const char *, off_t off, int whence, struct fuse_file_info *);
+
+	/**
+	 * Get extended file attributes.
+	 *
+	 * fi may be NULL.
+	 *
+	 * If path is NULL, then the AT_EMPTY_PATH bit in flags will be
+	 * already set.
+	 */
+	int (*statx)(const char *path, int flags, int mask, struct statx *stxbuf,
+		     struct fuse_file_info *fi);
 };
 
 /** Extra context that may be needed by some filesystems
@@ -1344,6 +1358,8 @@ ssize_t fuse_fs_copy_file_range(struct fuse_fs *fs, const char *path_in,
 				size_t len, int flags);
 off_t fuse_fs_lseek(struct fuse_fs *fs, const char *path, off_t off, int whence,
 		    struct fuse_file_info *fi);
+int fuse_fs_statx(struct fuse_fs *fs, const char *path, int flags, int mask,
+		  struct statx *stxbuf, struct fuse_file_info *fi);
 void fuse_fs_init(struct fuse_fs *fs, struct fuse_conn_info *conn,
 		struct fuse_config *cfg);
 void fuse_fs_destroy(struct fuse_fs *fs);

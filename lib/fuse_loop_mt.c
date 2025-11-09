@@ -5,7 +5,7 @@
   Implementation of the multi-threaded FUSE session loop.
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB.
+  See the file LGPL2.txt.
 */
 
 #ifndef _GNU_SOURCE
@@ -134,7 +134,7 @@ static void *fuse_do_work(void *data)
 	struct fuse_mt *mt = w->mt;
 	struct fuse_session *se = mt->se;
 
-	fuse_set_thread_name(pthread_self(), "fuse_worker");
+	fuse_set_thread_name("fuse_worker");
 
 	while (!fuse_session_exited(se)) {
 		int isforget = 0;
@@ -173,7 +173,8 @@ static void *fuse_do_work(void *data)
 
 		if (!isforget)
 			mt->numavail--;
-		if (mt->numavail == 0 && mt->numworker < mt->max_threads)
+		if (mt->numavail == 0 && mt->numworker < mt->max_threads &&
+		    likely(se->got_init))
 			fuse_loop_start_thread(mt);
 		pthread_mutex_unlock(&se->mt_lock);
 
@@ -273,9 +274,15 @@ static int fuse_clone_chan_fd_default(struct fuse_session *se)
 			strerror(errno));
 		return -1;
 	}
-#ifndef O_CLOEXEC
-	fcntl(clonefd, F_SETFD, FD_CLOEXEC);
-#endif
+	if (!O_CLOEXEC) {
+		res = fcntl(clonefd, F_SETFD, FD_CLOEXEC);
+		if (res == -1) {
+			fuse_log(FUSE_LOG_ERR, "fuse: failed to set CLOEXEC: %s\n",
+				strerror(errno));
+			close(clonefd);
+			return -1;
+		}
+	}
 
 	masterfd = se->fd;
 	res = ioctl(clonefd, FUSE_DEV_IOC_CLONE, &masterfd);
@@ -360,12 +367,11 @@ static void fuse_join_worker(struct fuse_mt *mt, struct fuse_worker *w)
 	free(w);
 }
 
-int fuse_session_loop_mt_312(struct fuse_session *se,
-			     struct fuse_loop_config *config);
+int fuse_session_loop_mt_312(struct fuse_session *se, struct fuse_loop_config *config);
 FUSE_SYMVER("fuse_session_loop_mt_312", "fuse_session_loop_mt@@FUSE_3.12")
 int fuse_session_loop_mt_312(struct fuse_session *se, struct fuse_loop_config *config)
 {
-	int err;
+int err;
 	struct fuse_mt mt;
 	struct fuse_worker *w;
 	int created_config = 0;
@@ -379,6 +385,7 @@ int fuse_session_loop_mt_312(struct fuse_session *se, struct fuse_loop_config *c
 		config = fuse_loop_cfg_create();
 		created_config = 1;
 	}
+
 
 	memset(&mt, 0, sizeof(struct fuse_mt));
 	mt.se = se;
@@ -527,3 +534,4 @@ void fuse_loop_cfg_set_clone_fd(struct fuse_loop_config *config,
 {
 	config->clone_fd = value;
 }
+

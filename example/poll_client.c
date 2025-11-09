@@ -4,7 +4,7 @@
   Copyright (C) 2008       Tejun Heo <teheo@suse.de>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 /** @file
@@ -36,7 +36,7 @@
 
 int main(void)
 {
-	static const char hex_map[FSEL_FILES] = "0123456789ABCDEF";
+	static const char hex_map[] = "0123456789ABCDEF";
 	int fds[FSEL_FILES];
 	int i, nfds, tries;
 

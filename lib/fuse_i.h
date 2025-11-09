@@ -3,7 +3,7 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB
+  See the file LGPL2.txt
 */
 
 #ifndef LIB_FUSE_I_H_
@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <errno.h>
+#include <stdatomic.h>
 
 #define MIN(a, b) \
 ({									\
@@ -37,8 +38,11 @@ struct fuse_req {
 	struct fuse_ctx ctx;
 	struct fuse_chan *ch;
 	int interrupted;
-	unsigned int ioctl_64bit : 1;
-	unsigned int is_uring : 1;
+	struct {
+		unsigned int ioctl_64bit : 1;
+		unsigned int is_uring : 1;
+		unsigned int is_copy_file_range_64 : 1;
+	} flags;
 	union {
 		struct {
 			uint64_t unique;
@@ -67,7 +71,7 @@ struct fuse_session_uring {
 };
 
 struct fuse_session {
-	char *mountpoint;
+	_Atomic(char *)mountpoint;
 	int fd;
 	struct fuse_custom_io *io;
 	struct mount_opts *mo;
@@ -106,6 +110,13 @@ struct fuse_session {
 
 	/* io_uring */
 	struct fuse_session_uring uring;
+
+	/*
+	 * conn->want and conn_want_ext options set by libfuse , needed
+	 * to correctly convert want to want_ext
+	 */
+	uint32_t conn_want;
+	uint64_t conn_want_ext;
 };
 
 struct fuse_chan {
@@ -209,6 +220,7 @@ int fuse_kern_mount(const char *mountpoint, struct mount_opts *mo);
 int fuse_send_reply_iov_nofree(fuse_req_t req, int error, struct iovec *iov,
 			       int count);
 void fuse_free_req(fuse_req_t req);
+void list_init_req(struct fuse_req *req);
 
 void _cuse_lowlevel_init(fuse_req_t req, const fuse_ino_t nodeid,
 			 const void *req_header, const void *req_payload);
@@ -250,39 +262,5 @@ int fuse_loop_cfg_verify(struct fuse_loop_config *config);
 /* room needed in buffer to accommodate header */
 #define FUSE_BUFFER_HEADER_SIZE 0x1000
 
-/**
- * Get the wanted capability flags, converting from old format if necessary
- */
-static inline int convert_to_conn_want_ext(struct fuse_conn_info *conn,
-					   uint64_t want_ext_default,
-					   uint32_t want_default)
-{
-	/*
-	 * Convert want to want_ext if necessary.
-	 * For the high level interface this function might be called
-	 * twice, once from the high level interface and once from the
-	 * low level interface. Both, with different want_ext_default and
-	 * want_default values. In order to suppress a failure for the
-	 * second call, we check if the lower 32 bits of want_ext are
-	 * already set to the value of want.
-	 */
-	if (conn->want != want_default &&
-	    fuse_lower_32_bits(conn->want_ext) != conn->want) {
-		if (conn->want_ext != want_ext_default) {
-			fuse_log(FUSE_LOG_ERR,
-				 "fuse: both 'want' and 'want_ext' are set\n");
-			return -EINVAL;
-		}
-
-		/* high bits from want_ext, low bits from want */
-		conn->want_ext = fuse_higher_32_bits(conn->want_ext) |
-				 conn->want;
-	}
-
-	/* ensure there won't be a second conversion */
-	conn->want = fuse_lower_32_bits(conn->want_ext);
-
-	return 0;
-}
 
 #endif /* LIB_FUSE_I_H_*/

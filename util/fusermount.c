@@ -3,11 +3,15 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 /* This program does the mounting and unmounting of FUSE filesystems */
 
+
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE /* for clone,strchrnul and close_range */
+#endif
+
 #include "fuse_config.h"
 #include "mount_util.h"
 #include "util.h"
@@ -38,6 +42,12 @@
 
 #ifdef HAVE_LINUX_CLOSE_RANGE_H
 #include <linux/close_range.h>
+#endif
+
+#if defined HAVE_LISTMOUNT
+#include <linux/mount.h>
+#include <syscall.h>
+#include <stdint.h>
 #endif
 
 #define FUSE_COMMFD_ENV		"_FUSE_COMMFD"
@@ -566,7 +576,7 @@ static int unmount_fuse(const char *mnt, int quiet, int lazy)
 	return res;
 }
 
-static int count_fuse_fs(void)
+static int count_fuse_fs_mtab(void)
 {
 	struct mntent *entp;
 	int count = 0;
@@ -586,6 +596,72 @@ static int count_fuse_fs(void)
 	return count;
 }
 
+#ifdef HAVE_LISTMOUNT
+static int count_fuse_fs_ls_mnt(void)
+{
+	#define SMBUF_SIZE 1024
+	#define MNT_ID_LEN 128
+
+	int fuse_count = 0;
+	int n_mounts = 0;
+	int ret = 0;
+	uint64_t mnt_ids[MNT_ID_LEN];
+	unsigned char smbuf[SMBUF_SIZE];
+	struct mnt_id_req req = {
+		.size = sizeof(struct mnt_id_req),
+	};
+	struct statmount *sm;
+
+	for (;;) {
+		req.mnt_id = LSMT_ROOT;
+
+		n_mounts = syscall(SYS_listmount, &req, &mnt_ids, MNT_ID_LEN, 0);
+		if (n_mounts == -1) {
+			if (errno != ENOSYS) {
+				fprintf(stderr, "%s: failed to list mounts: %s\n", progname,
+					strerror(errno));
+			}
+			return -1;
+		}
+
+		for (int i = 0; i < n_mounts; i++) {
+			req.mnt_id = mnt_ids[i];
+			req.param = STATMOUNT_FS_TYPE;
+			ret = syscall(SYS_statmount, &req, &smbuf, SMBUF_SIZE, 0);
+			if (ret) {
+				if (errno == ENOENT)
+					continue;
+
+				fprintf(stderr, "%s: failed to stat mount %lld: %s\n", progname,
+					req.mnt_id, strerror(errno));
+				return -1;
+			}
+
+			sm = (struct statmount *)smbuf;
+			if (sm->mask & STATMOUNT_FS_TYPE &&
+			    strcmp(&sm->str[sm->fs_type], "fuse") == 0)
+				fuse_count++;
+		}
+
+		if (n_mounts < MNT_ID_LEN)
+			break;
+		req.param = mnt_ids[MNT_ID_LEN - 1];
+	}
+	return fuse_count;
+}
+
+static int count_fuse_fs(void)
+{
+	int count = count_fuse_fs_ls_mnt();
+
+	return count >= 0 ? count : count_fuse_fs_mtab();
+}
+#else
+static int count_fuse_fs(void)
+{
+	return count_fuse_fs_mtab();
+}
+#endif
 
 #else /* IGNORE_MTAB */
 static int count_fuse_fs(void)

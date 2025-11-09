@@ -7,7 +7,7 @@
   file system by implementing nothing but the request handlers.
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB.
+  See the file LGPL2.txt.
 */
 
 #include "fuse_config.h"
@@ -139,11 +139,7 @@ void fuse_cmdline_help(void)
 	       "    -o max_idle_threads    the maximum number of idle worker threads\n"
 	       "                           allowed (default: -1)\n"
 	       "    -o max_threads         the maximum number of worker threads\n"
-	       "                           allowed (default: 10)\n"
-	       /* fuse_ll_opts in fuse_lowlevel.c, FIXME, call into that file */
-	       "    -o io_uring            enable io-uring\n"
-	       "    -o io_uring_q_depth=<n> io-uring queue depth\n"
-);
+	       "                           allowed (default: 10)\n");
 }
 
 static int fuse_helper_opt_proc(void *data, const char *arg, int key,
@@ -430,13 +426,13 @@ void fuse_apply_conn_info_opts(struct fuse_conn_info_opts *opts,
 #define LL_ENABLE(cond, cap)                     \
 	do {                                     \
 		if (cond)                        \
-			conn->want_ext |= (cap); \
+			fuse_set_feature_flag(conn, cap); \
 	} while (0)
 
 #define LL_DISABLE(cond, cap)                     \
 	do {                                      \
 		if (cond)                         \
-			conn->want_ext &= ~(cap); \
+			fuse_unset_feature_flag(conn, cap); \
 	} while (0)
 
 	LL_ENABLE(opts->splice_read, FUSE_CAP_SPLICE_READ);

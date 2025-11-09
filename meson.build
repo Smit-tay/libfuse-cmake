@@ -4,7 +4,7 @@ project('libfuse3', ['c'],
         default_options: [
             'buildtype=debugoptimized',
             'c_std=gnu11',
-            'cpp_std=c++17',
+            'cpp_std=c++20',
             'warning_level=2',
         ])
 
@@ -59,7 +59,6 @@ include_default = '''
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <assert.h>     /* For static_assert */
 #include <pthread.h>    /* For pthread_setname_np */
 '''
 args_default = [ '-D_GNU_SOURCE' ]
@@ -74,7 +73,7 @@ private_cfg.set_quoted('PACKAGE_VERSION', meson.project_version())
 # Test for presence of some functions
 test_funcs = [ 'fork', 'fstatat', 'openat', 'readlinkat', 'pipe2',
                'splice', 'vmsplice', 'posix_fallocate', 'fdatasync',
-               'utimensat', 'copy_file_range', 'fallocate', 'close_range' ]
+               'utimensat', 'copy_file_range', 'fallocate', 'fspacectl' ]
 foreach func : test_funcs
     private_cfg.set('HAVE_' + func.to_upper(),
         cc.has_function(func, prefix: include_default, args: args_default))
@@ -82,11 +81,6 @@ endforeach
 
 # Special case checks that need custom code
 special_funcs = {
-    'static_assert': '''
-        #include <assert.h>
-        static_assert(1, "test");
-        int main(void) { return 0; }
-    ''',
     'pthread_setname_np': '''
         #include <pthread.h>
         int main(void) {
@@ -98,11 +92,32 @@ special_funcs = {
     'close_range': '''
         #include <unistd.h>
         #include <fcntl.h>
+        #ifdef linux
         #include <linux/close_range.h>
+        #endif
         int main(void) {
             unsigned int flags = CLOSE_RANGE_UNSHARE;
             return close_range(3, ~0U, flags);
         }
+    ''',
+    'listmount': '''
+	#include <syscall.h>
+	#include <linux/mount.h>
+	#include <unistd.h>
+	#include <stdint.h>
+
+	int main(int argc, char *argv[]) {
+	  struct mnt_id_req req = {
+	    .size = sizeof(struct mnt_id_req),
+		  .mnt_id = LSMT_ROOT,
+	  };
+	  uint64_t mnt_ids[1];
+
+	  int n = syscall(SYS_listmount, &req, &mnt_ids, 1, 0);
+	  if (n == -1) {
+	    return -1;
+	  }
+	}
     '''
 }
 
@@ -112,6 +127,13 @@ foreach name, code : special_funcs
                  name: name + ' check'))
 endforeach
 
+# Headers checks
+test_headers = [ 'sys/xattr.h', 'linux/limits.h' ]
+foreach header : test_headers
+    private_cfg.set('HAVE_' + header.underscorify().to_upper(),
+        cc.has_header(header))
+endforeach
+
 # Regular function checks
 private_cfg.set('HAVE_SETXATTR',
     cc.has_function('setxattr', prefix: '#include <sys/xattr.h>'))
@@ -119,6 +141,8 @@ private_cfg.set('HAVE_ICONV',
     cc.has_function('iconv', prefix: '#include <iconv.h>'))
 private_cfg.set('HAVE_BACKTRACE',
     cc.has_function('backtrace', prefix: '#include <execinfo.h>'))
+private_cfg.set('HAVE_STATX',
+        cc.has_function('statx',  prefix : '#define _GNU_SOURCE\n#include <sys/stat.h>'))
 
 # Struct member checks
 private_cfg.set('HAVE_STRUCT_STAT_ST_ATIM',
@@ -145,12 +169,10 @@ int main(void) {
     return ret;
 }'''
 
-liburing = get_option('enable-io-uring') ? \
-    dependency('liburing', required: false) :\
-    dependency('', required: false)
+liburing = dependency('liburing', required: false)
 libnuma = dependency('numa', required: false)
 
-if liburing.found() and libnuma.found()
+if get_option('enable-io-uring') and liburing.found() and libnuma.found()
    if cc.links(code,
               name: 'liburing linking and SQE128 support',
               dependencies: [liburing])

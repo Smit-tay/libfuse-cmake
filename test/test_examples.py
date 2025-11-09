@@ -93,7 +93,7 @@ def readdir_inode(dir):
 @pytest.mark.parametrize("cmdline_builder", (invoke_directly, invoke_mount_fuse,
                                              invoke_mount_fuse_drop_privileges))
 @pytest.mark.parametrize("options", powerset(options))
-@pytest.mark.parametrize("name", ('hello', 'hello_ll'))# Removed 'test/hello' as it duplicates the 'hello' example in examples/
+@pytest.mark.parametrize("name", ('hello', 'hello_ll', 'test/hello'))
 def test_hello(tmpdir, name, options, cmdline_builder, output_checker):
     logger = logging.getLogger(__name__)
     mnt_dir = str(tmpdir)
@@ -376,7 +376,8 @@ def test_null(tmpdir, output_checker):
 
 @pytest.mark.skipif(fuse_proto < (7,12),
                     reason='not supported by running kernel')
-@pytest.mark.parametrize("only_expire", ("invalidate_entries", "expire_entries"))
+@pytest.mark.parametrize("only_expire", ("invalidate_entries",
+                                         "expire_entries", "inc_epoch"))
 @pytest.mark.parametrize("notify", (True, False))
 def test_notify_inval_entry(tmpdir, only_expire, notify, output_checker):
     mnt_dir = str(tmpdir)
@@ -390,6 +391,10 @@ def test_notify_inval_entry(tmpdir, only_expire, notify, output_checker):
         cmdline.append('--only-expire')
         if "FUSE_CAP_EXPIRE_ONLY" not in fuse_caps:
             pytest.skip('only-expire not supported by running kernel')
+    elif only_expire == "inc_epoch":
+        cmdline.append('--inc-epoch')
+        if fuse_proto < (7,44):
+            pytest.skip('inc-epoch not supported by running kernel')
     mount_process = subprocess.Popen(cmdline, stdout=output_checker.fd,
                                      stderr=output_checker.fd)
     try:

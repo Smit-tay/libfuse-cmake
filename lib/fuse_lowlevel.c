@@ -6,7 +6,7 @@
   functions are implemented in separate files.
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB
+  See the file LGPL2.txt
 */
 
 #ifndef _GNU_SOURCE
@@ -25,6 +25,7 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -147,7 +148,7 @@ static	size_t iov_length(const struct iovec *iov, size_t count)
 	return ret;
 }
 
-static void list_init_req(struct fuse_req *req)
+void list_init_req(struct fuse_req *req)
 {
 	req->next = req;
 	req->prev = req;
@@ -172,7 +173,7 @@ static void list_add_req(struct fuse_req *req, struct fuse_req *next)
 
 static void destroy_req(fuse_req_t req)
 {
-	if (req->is_uring) {
+	if (req->flags.is_uring) {
 		fuse_log(FUSE_LOG_ERR, "Refusing to destruct uring req\n");
 		return;
 	}
@@ -190,7 +191,7 @@ void fuse_free_req(fuse_req_t req)
 	 *      It actually might work already, though. But then would add
 	 *      a lock across ring queues.
 	 */
-	if (se->conn.no_interrupt || req->is_uring) {
+	if (se->conn.no_interrupt || req->flags.is_uring) {
 		ctr = --req->ref_cnt;
 		fuse_chan_put(req->ch);
 		req->ch = NULL;
@@ -220,7 +221,6 @@ static struct fuse_req *fuse_ll_alloc_req(struct fuse_session *se)
 		req->ref_cnt = 1;
 		list_init_req(req);
 		pthread_mutex_init(&req->lock, NULL);
-		req->is_uring = false;
 	}
 
 	return req;
@@ -261,7 +261,7 @@ static int fuse_send_msg(struct fuse_session *se, struct fuse_chan *ch,
 {
 	struct fuse_out_header *out = iov[0].iov_base;
 	int err;
-	bool is_uring = req && req->is_uring ? true : false;
+	bool is_uring = req && req->flags.is_uring ? true : false;
 
 	if (!is_uring)
 		assert(se != NULL);
@@ -329,7 +329,7 @@ static int send_reply_iov(fuse_req_t req, int error, struct iovec *iov,
 static int send_reply(fuse_req_t req, int error, const void *arg,
 		      size_t argsize)
 {
-	if (req->is_uring)
+	if (req->flags.is_uring)
 		return send_reply_uring(req, error, arg, argsize);
 
 	struct iovec iov[2];
@@ -591,7 +591,7 @@ int fuse_reply_open(fuse_req_t req, const struct fuse_file_info *f)
 	return send_reply_ok(req, &arg, sizeof(arg));
 }
 
-int fuse_reply_write(fuse_req_t req, size_t count)
+static int do_fuse_reply_write(fuse_req_t req, size_t count)
 {
 	struct fuse_write_out arg;
 
@@ -599,6 +599,28 @@ int fuse_reply_write(fuse_req_t req, size_t count)
 	arg.size = count;
 
 	return send_reply_ok(req, &arg, sizeof(arg));
+}
+
+static int do_fuse_reply_copy(fuse_req_t req, size_t count)
+{
+	struct fuse_copy_file_range_out arg;
+
+	memset(&arg, 0, sizeof(arg));
+	arg.bytes_copied = count;
+
+	return send_reply_ok(req, &arg, sizeof(arg));
+}
+
+int fuse_reply_write(fuse_req_t req, size_t count)
+{
+	/*
+	 * This function is also used by FUSE_COPY_FILE_RANGE and its 64-bit
+	 * variant.
+	 */
+	if (req->flags.is_copy_file_range_64)
+		return do_fuse_reply_copy(req, count);
+	else
+		return do_fuse_reply_write(req, count);
 }
 
 int fuse_reply_buf(fuse_req_t req, const char *buf, size_t size)
@@ -733,11 +755,15 @@ static int read_back(int fd, char *buf, size_t len)
 
 	res = read(fd, buf, len);
 	if (res == -1) {
-		fuse_log(FUSE_LOG_ERR, "fuse: internal error: failed to read back from pipe: %s\n", strerror(errno));
+		fuse_log(FUSE_LOG_ERR,
+			 "fuse: internal error: failed to read back from pipe: %s\n",
+			 strerror(errno));
 		return -EIO;
 	}
 	if (res != len) {
-		fuse_log(FUSE_LOG_ERR, "fuse: internal error: short read back from pipe: %i from %zi\n", res, len);
+		fuse_log(FUSE_LOG_ERR,
+			 "fuse: internal error: short read back from pipe: %i from %zd\n",
+			 res, len);
 		return -EIO;
 	}
 	return 0;
@@ -981,12 +1007,13 @@ fallback:
 #else
 static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 			       struct iovec *iov, int iov_count,
-			       struct fuse_bufvec *req_data, unsigned int flags)
+			       struct fuse_bufvec *req_data, unsigned int flags,
+			       fuse_req_t req)
 {
 	size_t len = fuse_buf_size(req_data);
 	(void) flags;
 
-	return fuse_send_data_iov_fallback(se, ch, iov, iov_count, req_data, len);
+	return fuse_send_data_iov_fallback(se, ch, iov, iov_count, req_data, len, req);
 }
 #endif
 
@@ -997,7 +1024,7 @@ int fuse_reply_data(fuse_req_t req, struct fuse_bufvec *bufv,
 	struct fuse_out_header out;
 	int res;
 
-	if (req->is_uring)
+	if (req->flags.is_uring)
 		return fuse_reply_data_uring(req, bufv, flags);
 
 	iov[0].iov_base = &out;
@@ -1115,7 +1142,7 @@ int fuse_reply_ioctl_retry(fuse_req_t req,
 		}
 	} else {
 		/* Can't handle non-compat 64bit ioctls on 32bit */
-		if (sizeof(void *) == 4 && req->ioctl_64bit) {
+		if (sizeof(void *) == 4 && req->flags.ioctl_64bit) {
 			res = fuse_reply_err(req, EINVAL);
 			goto out;
 		}
@@ -1216,6 +1243,33 @@ int fuse_reply_lseek(fuse_req_t req, off_t off)
 
 	return send_reply_ok(req, &arg, sizeof(arg));
 }
+
+#ifdef HAVE_STATX
+int fuse_reply_statx(fuse_req_t req, int flags, struct statx *statx,
+		     double attr_timeout)
+{
+	struct fuse_statx_out arg;
+
+	memset(&arg, 0, sizeof(arg));
+	arg.flags = flags;
+	arg.attr_valid = calc_timeout_sec(attr_timeout);
+	arg.attr_valid_nsec = calc_timeout_nsec(attr_timeout);
+	memcpy(&arg.stat, statx, sizeof(arg.stat));
+
+	return send_reply_ok(req, &arg, sizeof(arg));
+}
+#else
+int fuse_reply_statx(fuse_req_t req, int flags, struct statx *statx,
+		     double attr_timeout)
+{
+	(void)req;
+	(void)flags;
+	(void)statx;
+	(void)attr_timeout;
+
+	return -ENOSYS;
+}
+#endif
 
 static void _do_lookup(fuse_req_t req, const fuse_ino_t nodeid,
 		       const void *op_in, const void *in_payload)
@@ -2296,7 +2350,7 @@ static void _do_ioctl(fuse_req_t req, const fuse_ino_t nodeid,
 
 	if (sizeof(void *) == 4 && req->se->conn.proto_minor >= 16 &&
 	    !(flags & FUSE_IOCTL_32BIT)) {
-		req->ioctl_64bit = 1;
+		req->flags.ioctl_64bit = 1;
 	}
 
 	if (req->se->op.ioctl)
@@ -2377,11 +2431,9 @@ static void do_fallocate(fuse_req_t req, const fuse_ino_t nodeid,
 	_do_fallocate(req, nodeid, inarg, NULL);
 }
 
-static void _do_copy_file_range(fuse_req_t req, const fuse_ino_t nodeid_in,
-				const void *op_in, const void *in_payload)
+static void copy_file_range_common(fuse_req_t req, const fuse_ino_t nodeid_in,
+				   const struct fuse_copy_file_range_in *arg)
 {
-	(void)in_payload;
-	const struct fuse_copy_file_range_in *arg = op_in;
 	struct fuse_file_info fi_in, fi_out;
 
 	memset(&fi_in, 0, sizeof(fi_in));
@@ -2398,12 +2450,50 @@ static void _do_copy_file_range(fuse_req_t req, const fuse_ino_t nodeid_in,
 		fuse_reply_err(req, ENOSYS);
 }
 
+static void _do_copy_file_range(fuse_req_t req, const fuse_ino_t nodeid_in,
+				const void *op_in, const void *in_payload)
+{
+	const struct fuse_copy_file_range_in *arg = op_in;
+	struct fuse_copy_file_range_in arg_tmp;
+
+	(void) in_payload;
+	/* fuse_write_out can only handle 32bit copy size */
+	if (arg->len > 0xfffff000) {
+		arg_tmp = *arg;
+		arg_tmp.len = 0xfffff000;
+		arg = &arg_tmp;
+	}
+	copy_file_range_common(req, nodeid_in, arg);
+}
+
 static void do_copy_file_range(fuse_req_t req, const fuse_ino_t nodeid_in,
 			       const void *inarg)
 {
 	_do_copy_file_range(req, nodeid_in, inarg, NULL);
 }
 
+static void _do_copy_file_range_64(fuse_req_t req, const fuse_ino_t nodeid_in,
+				   const void *op_in, const void *in_payload)
+{
+	(void) in_payload;
+	req->flags.is_copy_file_range_64 = 1;
+	/* Limit size on 32bit userspace to avoid conversion overflow */
+	if (sizeof(size_t) == 4)
+		_do_copy_file_range(req, nodeid_in, op_in, NULL);
+	else
+		copy_file_range_common(req, nodeid_in, op_in);
+}
+
+static void do_copy_file_range_64(fuse_req_t req, const fuse_ino_t nodeid_in,
+			       const void *inarg)
+{
+	_do_copy_file_range_64(req, nodeid_in, inarg, NULL);
+}
+
+/*
+ * Note that the uint64_t offset in struct fuse_lseek_in is derived from
+ * linux kernel loff_t and is therefore signed.
+ */
 static void _do_lseek(fuse_req_t req, const fuse_ino_t nodeid,
 		      const void *op_in, const void *in_payload)
 {
@@ -2425,16 +2515,124 @@ static void do_lseek(fuse_req_t req, const fuse_ino_t nodeid, const void *inarg)
 	_do_lseek(req, nodeid, inarg, NULL);
 }
 
+#ifdef HAVE_STATX
+static void _do_statx(fuse_req_t req, const fuse_ino_t nodeid,
+		      const void *op_in, const void *in_payload)
+{
+	(void)in_payload;
+	const struct fuse_statx_in *arg = op_in;
+	struct fuse_file_info *fip = NULL;
+	struct fuse_file_info fi;
+
+	if (arg->getattr_flags & FUSE_GETATTR_FH) {
+		memset(&fi, 0, sizeof(fi));
+		fi.fh = arg->fh;
+		fip = &fi;
+	}
+
+	if (req->se->op.statx)
+		req->se->op.statx(req, nodeid, arg->sx_flags, arg->sx_mask, fip);
+	else
+		fuse_reply_err(req, ENOSYS);
+}
+#else
+static void _do_statx(fuse_req_t req, const fuse_ino_t nodeid,
+		      const void *op_in, const void *in_payload)
+{
+	(void)in_payload;
+	(void)req;
+	(void)nodeid;
+	(void)op_in;
+}
+#endif
+
+static void do_statx(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
+{
+	_do_statx(req, nodeid, inarg, NULL);
+}
+
 static bool want_flags_valid(uint64_t capable, uint64_t want)
 {
 	uint64_t unknown_flags = want & (~capable);
 	if (unknown_flags != 0) {
 		fuse_log(FUSE_LOG_ERR,
-			 "fuse: unknown connection 'want' flags: 0x%08lx\n",
-			unknown_flags);
+			 "fuse: unknown connection 'want' flags: 0x%08llx\n",
+			(unsigned long long)unknown_flags);
 		return false;
 	}
 	return true;
+}
+
+/**
+ * Get the wanted capability flags, converting from old format if necessary
+ */
+int fuse_convert_to_conn_want_ext(struct fuse_conn_info *conn)
+{
+	struct fuse_session *se = container_of(conn, struct fuse_session, conn);
+
+	/*
+	 * Convert want to want_ext if necessary.
+	 * For the high level interface this function might be called
+	 * twice, once from the high level interface and once from the
+	 * low level interface. Both, with different want_ext_default and
+	 * want_default values. In order to suppress a failure for the
+	 * second call, we check if the lower 32 bits of want_ext are
+	 * already set to the value of want.
+	 */
+	if (conn->want != se->conn_want &&
+	    fuse_lower_32_bits(conn->want_ext) != conn->want) {
+		if (conn->want_ext != se->conn_want_ext) {
+			fuse_log(FUSE_LOG_ERR,
+				 "%s: Both conn->want_ext and conn->want are set.\n"
+				 "want=%x want_ext=%llx, se->want=%x se->want_ext=%llx\n",
+				 __func__, conn->want,
+				 (unsigned long long)conn->want_ext,
+				 se->conn_want,
+				 (unsigned long long)se->conn_want_ext);
+			return -EINVAL;
+		}
+
+		/* high bits from want_ext, low bits from want */
+		conn->want_ext = fuse_higher_32_bits(conn->want_ext) |
+				 conn->want;
+	}
+
+	/* ensure there won't be a second conversion */
+	conn->want = fuse_lower_32_bits(conn->want_ext);
+
+	return 0;
+}
+
+bool fuse_set_feature_flag(struct fuse_conn_info *conn,
+					 uint64_t flag)
+{
+	struct fuse_session *se = container_of(conn, struct fuse_session, conn);
+
+	if (conn->capable_ext & flag) {
+		conn->want_ext |= flag;
+		se->conn_want_ext |= flag;
+		conn->want  |= flag;
+		se->conn_want |= flag;
+		return true;
+	}
+	return false;
+}
+
+void fuse_unset_feature_flag(struct fuse_conn_info *conn,
+					 uint64_t flag)
+{
+	struct fuse_session *se = container_of(conn, struct fuse_session, conn);
+
+	conn->want_ext &= ~flag;
+	se->conn_want_ext &= ~flag;
+	conn->want  &= ~flag;
+	se->conn_want &= ~flag;
+}
+
+bool fuse_get_feature_flag(struct fuse_conn_info *conn,
+					     uint64_t flag)
+{
+	return conn->capable_ext & flag ? true : false;
 }
 
 /* Prevent bogus data races (bogus since "init" is called before
@@ -2603,15 +2801,9 @@ _do_init(fuse_req_t req, const fuse_ino_t nodeid, const void *op_in,
 
 	se->conn.time_gran = 1;
 
-	se->got_init = 1;
 	if (se->op.init) {
-		uint64_t want_ext_default = se->conn.want_ext;
-		uint32_t want_default = fuse_lower_32_bits(se->conn.want_ext);
-		int rc;
-
 		// Apply the first 32 bits of capable_ext to capable
 		se->conn.capable = fuse_lower_32_bits(se->conn.capable_ext);
-		se->conn.want = want_default;
 
 		se->op.init(se->userdata, &se->conn);
 
@@ -2620,14 +2812,7 @@ _do_init(fuse_req_t req, const fuse_ino_t nodeid, const void *op_in,
 		 * se->conn.want_ext
 		 * Userspace might still use conn.want - we need to convert it
 		 */
-		rc = convert_to_conn_want_ext(&se->conn, want_ext_default,
-					      want_default);
-		if (rc != 0) {
-			fuse_reply_err(req, EPROTO);
-			se->error = -EPROTO;
-			fuse_session_exit(se);
-			return;
-		}
+		fuse_convert_to_conn_want_ext(&se->conn);
 	}
 
 	if (!want_flags_valid(se->conn.capable_ext, se->conn.want_ext)) {
@@ -2722,12 +2907,10 @@ _do_init(fuse_req_t req, const fuse_ino_t nodeid, const void *op_in,
 		enable_io_uring = true;
 	}
 
-	if (inargflags & FUSE_INIT_EXT) {
-		outargflags |= FUSE_INIT_EXT;
-		outarg.flags2 = outargflags >> 32;
+	if ((inargflags & FUSE_REQUEST_TIMEOUT) && se->conn.request_timeout) {
+		outargflags |= FUSE_REQUEST_TIMEOUT;
+		outarg.request_timeout = se->conn.request_timeout;
 	}
-
-	outarg.flags = outargflags;
 
 	outarg.max_readahead = se->conn.max_readahead;
 	outarg.max_write = se->conn.max_write;
@@ -2768,18 +2951,35 @@ _do_init(fuse_req_t req, const fuse_ino_t nodeid, const void *op_in,
 	else if (arg->minor < 23)
 		outargsize = FUSE_COMPAT_22_INIT_OUT_SIZE;
 
-	send_reply_ok(req, &outarg, outargsize);
-
-	/* XXX: Split the start, and send SQEs only after send_reply_ok() */
+	/* XXX: Add an option to make non-available io-uring fatal */
 	if (enable_io_uring) {
 		int ring_rc = fuse_uring_start(se);
 
 		if (ring_rc != 0) {
-			fuse_log(FUSE_LOG_ERR, "fuse: failed to start io-uring: %s\n",
+			fuse_log(FUSE_LOG_INFO,
+				 "fuse: failed to start io-uring: %s\n",
 				 strerror(ring_rc));
-			fuse_session_exit(se);
+			outargflags &= ~FUSE_OVER_IO_URING;
+			enable_io_uring = false;
 		}
 	}
+
+	if (inargflags & FUSE_INIT_EXT) {
+		outargflags |= FUSE_INIT_EXT;
+		outarg.flags2 = outargflags >> 32;
+	}
+	outarg.flags = outargflags;
+
+	/*
+	 * Has to be set before replying, as new kernel requests might
+	 * immediately arrive and got_init is used for op-code sanity.
+	 * Especially with external handlers, where we have no control
+	 * over the thread scheduling.
+	 */
+	se->got_init = 1;
+	send_reply_ok(req, &outarg, outargsize);
+	if (enable_io_uring)
+		fuse_uring_wake_ring_threads(se);
 }
 
 static __attribute__((no_sanitize("thread"))) void
@@ -2792,10 +2992,14 @@ static void _do_destroy(fuse_req_t req, const fuse_ino_t nodeid,
 			const void *op_in, const void *in_payload)
 {
 	struct fuse_session *se = req->se;
+	char *mountpoint;
 
 	(void) nodeid;
 	(void)op_in;
 	(void)in_payload;
+
+	mountpoint = atomic_exchange(&se->mountpoint, NULL);
+	free(mountpoint);
 
 	se->got_destroy = 1;
 	se->got_init = 0;
@@ -2909,6 +3113,19 @@ int fuse_lowlevel_notify_inval_inode(struct fuse_session *se, fuse_ino_t ino,
 	iov[1].iov_len = sizeof(outarg);
 
 	return send_notify_iov(se, FUSE_NOTIFY_INVAL_INODE, iov, 2);
+}
+
+int fuse_lowlevel_notify_increment_epoch(struct fuse_session *se)
+{
+	struct iovec iov[1];
+
+	if (!se)
+		return -EINVAL;
+
+	if (se->conn.proto_minor < 44)
+		return -ENOSYS;
+
+	return send_notify_iov(se, FUSE_NOTIFY_INC_EPOCH, iov, 1);
 }
 
 /**
@@ -3164,8 +3381,20 @@ int fuse_req_interrupted(fuse_req_t req)
 
 bool fuse_req_is_uring(fuse_req_t req)
 {
-	return req->is_uring;
+	return req->flags.is_uring;
 }
+
+#ifndef HAVE_URING
+int fuse_req_get_payload(fuse_req_t req, char **payload, size_t *payload_sz,
+			 void **mr)
+{
+	(void)req;
+	(void)payload;
+	(void)payload_sz;
+	(void)mr;
+	return -ENOTSUP;
+}
+#endif
 
 static struct {
 	void (*func)(fuse_req_t req, const fuse_ino_t node, const void *arg);
@@ -3216,7 +3445,9 @@ static struct {
 	[FUSE_READDIRPLUS] = { do_readdirplus,	"READDIRPLUS"},
 	[FUSE_RENAME2]     = { do_rename2,      "RENAME2"    },
 	[FUSE_COPY_FILE_RANGE] = { do_copy_file_range, "COPY_FILE_RANGE" },
+	[FUSE_COPY_FILE_RANGE_64] = { do_copy_file_range_64, "COPY_FILE_RANGE_64" },
 	[FUSE_LSEEK]	   = { do_lseek,       "LSEEK"	     },
+	[FUSE_STATX]	   = { do_statx,       "STATX"	     },
 	[CUSE_INIT]	   = { cuse_lowlevel_init, "CUSE_INIT"   },
 };
 
@@ -3270,7 +3501,9 @@ static struct {
 	[FUSE_READDIRPLUS]	= { _do_readdirplus,	"READDIRPLUS" },
 	[FUSE_RENAME2]		= { _do_rename2,	"RENAME2" },
 	[FUSE_COPY_FILE_RANGE]	= { _do_copy_file_range, "COPY_FILE_RANGE" },
+	[FUSE_COPY_FILE_RANGE_64]	= { _do_copy_file_range_64, "COPY_FILE_RANGE_64" },
 	[FUSE_LSEEK]		= { _do_lseek,		"LSEEK" },
+	[FUSE_STATX]		= { _do_statx,		"STATX" },
 	[CUSE_INIT]		= { _cuse_lowlevel_init, "CUSE_INIT" },
 };
 
@@ -3574,7 +3807,6 @@ void fuse_lowlevel_help(void)
 	printf(
 "    -o allow_other         allow access by all users\n"
 "    -o allow_root          allow access by root\n"
-"    -o auto_unmount        auto unmount on process termination\n"
 "    -o auto_unmount        auto unmount on process termination\n"
 "    -o io_uring            enable io-uring\n"
 "    -o io_uring_q_depth=<n> io-uring queue depth\n"
@@ -3889,12 +4121,23 @@ fuse_session_new_versioned(struct fuse_args *args,
 	struct fuse_session *se;
 	struct mount_opts *mo;
 
+	if (op == NULL || op_size == 0) {
+		fuse_log(FUSE_LOG_ERR,
+			 "fuse: warning: empty op list passed to fuse_session_new()\n");
+		return NULL;
+	}
+
+	if (version == NULL) {
+		fuse_log(FUSE_LOG_ERR, "fuse: warning: version not passed to fuse_session_new()\n");
+		return NULL;
+	}
+
 	if (sizeof(struct fuse_lowlevel_ops) < op_size) {
 		fuse_log(FUSE_LOG_ERR, "fuse: warning: library too old, some operations may not work\n");
 		op_size = sizeof(struct fuse_lowlevel_ops);
 	}
 
-	if (args->argc == 0) {
+	if (args == NULL || args->argc == 0) {
 		fuse_log(FUSE_LOG_ERR, "fuse: empty argv passed to fuse_session_new().\n");
 		return NULL;
 	}
@@ -4006,8 +4249,21 @@ struct fuse_session *fuse_session_new_30(struct fuse_args *args,
 					  size_t op_size,
 					  void *userdata)
 {
+	struct fuse_lowlevel_ops null_ops = { 0 };
+
 	/* unknown version */
 	struct libfuse_version version = { 0 };
+
+	/*
+	 * This function is the ABI interface function from fuse_session_new in
+	 * compat.c. External libraries like "fuser" might call fuse_session_new()
+	 * with NULL ops and then pass that session to fuse_session_mount().
+	 * The actual FUSE operations are handled in their own library.
+	 */
+	if (op == NULL) {
+		op = &null_ops;
+		op_size = sizeof(null_ops);
+	}
 
 	return fuse_session_new_versioned(args, op, op_size, &version,
 					  userdata);
@@ -4063,12 +4319,20 @@ int fuse_session_custom_io_30(struct fuse_session *se,
 			offsetof(struct fuse_custom_io, clone_fd), fd);
 }
 
-int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
+int fuse_session_mount(struct fuse_session *se, const char *_mountpoint)
 {
 	int fd;
+	char *mountpoint;
 
-	if (mountpoint == NULL) {
+	if (_mountpoint == NULL) {
 		fuse_log(FUSE_LOG_ERR, "Invalid null-ptr mountpoint!\n");
+		return -1;
+	}
+
+	mountpoint = strdup(_mountpoint);
+	if (mountpoint == NULL) {
+		fuse_log(FUSE_LOG_ERR, "Failed to allocate memory for mountpoint. Error: %s\n",
+			strerror(errno));
 		return -1;
 	}
 
@@ -4094,7 +4358,7 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 			fuse_log(FUSE_LOG_ERR,
 				"fuse: Invalid file descriptor /dev/fd/%u\n",
 				fd);
-			return -1;
+			goto error_out;
 		}
 		se->fd = fd;
 		return 0;
@@ -4103,18 +4367,16 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint)
 	/* Open channel */
 	fd = fuse_kern_mount(mountpoint, se->mo);
 	if (fd == -1)
-		return -1;
+		goto error_out;
 	se->fd = fd;
 
 	/* Save mountpoint */
-	se->mountpoint = strdup(mountpoint);
-	if (se->mountpoint == NULL)
-		goto error_out;
+	se->mountpoint = mountpoint;
 
 	return 0;
 
 error_out:
-	fuse_kern_unmount(mountpoint, fd);
+	free(mountpoint);
 	return -1;
 }
 
@@ -4126,10 +4388,11 @@ int fuse_session_fd(struct fuse_session *se)
 void fuse_session_unmount(struct fuse_session *se)
 {
 	if (se->mountpoint != NULL) {
-		fuse_kern_unmount(se->mountpoint, se->fd);
+		char *mountpoint = atomic_exchange(&se->mountpoint, NULL);
+
+		fuse_kern_unmount(mountpoint, se->fd);
 		se->fd = -1;
-		free(se->mountpoint);
-		se->mountpoint = NULL;
+		free(mountpoint);
 	}
 }
 

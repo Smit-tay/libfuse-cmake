@@ -3,7 +3,7 @@
   Copyright (C) 2016 Nikolaus Rath <Nikolaus@rath.org>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 #ifdef FUSE_USE_VERSION
@@ -104,21 +104,21 @@ static int tfs_stat(fuse_ino_t ino, struct stat *stbuf)
 
 static void tfs_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-    struct fuse_entry_param e;
+	struct fuse_entry_param e;
 
-    memset(&e, 0, sizeof(e));
+	memset(&e, 0, sizeof(e));
 
-    if (parent != FUSE_ROOT_ID)
-        goto err_out;
-    else if (strcmp(name, FILE_NAME) == 0)
-        e.ino = FILE_INO;
-    else
-        goto err_out;
+	if (parent != FUSE_ROOT_ID)
+		goto err_out;
+	else if (strcmp(name, FILE_NAME) == 0)
+		e.ino = FILE_INO;
+	else
+		goto err_out;
 
-    if (tfs_stat(e.ino, &e.attr) != 0)
-        goto err_out;
-    fuse_reply_entry(req, &e);
-    return;
+	if (tfs_stat(e.ino, &e.attr) != 0)
+		goto err_out;
+	fuse_reply_entry(req, &e);
+	return;
 
 err_out:
 	fuse_reply_err(req, ENOENT);

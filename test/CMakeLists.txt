@@ -50,6 +50,12 @@ target_sources(test_signals PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_signals.c)
 target_include_directories(test_signals PUBLIC ${INCLUDE_DIRS})
 target_link_libraries(test_signals fuse3 ${CMAKE_THREAD_LIBS_INIT})
 
+
+add_executable(test_abi)
+target_sources(test_abi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_abi.c)
+target_include_directories(test_abi PUBLIC ${INCLUDE_DIRS})
+target_link_libraries(test_abi fuse3 ${CMAKE_THREAD_LIBS_INIT})
+
 set(TEST_SCRIPTS conftest.py pytest.ini test_examples.py util.py test_ctests.py)
 
 add_custom_target(test_scripts)

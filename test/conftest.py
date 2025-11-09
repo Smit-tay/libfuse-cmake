@@ -66,11 +66,7 @@ class OutputChecker:
         for (pattern, flags, count) in self._false_positives:
             cp = re.compile(pattern, flags)
             (buf, cnt) = cp.subn('', buf, count=count)
-        
-        # Strip out expected FUSE error messages
-        fuse_error_pattern = r'error: -\d+ \([^)]+\)'
-        buf = re.sub(fuse_error_pattern, '', buf, flags=re.MULTILINE)
-        
+
         patterns = [ r'\b{}\b'.format(x) for x in
                      ('exception', 'error', 'warning', 'fatal', 'traceback',
                         'fault', 'crash(?:ed)?', 'abort(?:ed)',
@@ -81,9 +77,11 @@ class OutputChecker:
             cp = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
             hit = cp.search(buf)
             if hit:
-                print("Captured stderr:", self.stderr)  # Debug print
-                raise AssertionError('Suspicious output to stderr (matched "%s")'
-                                     % hit.group(0))
+                # Skip FUSE error messages in the format "unique: X, error: -Y (...), outsize: Z"
+                # These are no errors, but just fuse debug messages with the return code
+                if re.search(r'unique: \d+, error: -\d+ \(.*\), outsize: \d+', hit.group(0)):
+                    continue
+                raise AssertionError(f'Suspicious output to stderr (matched "{hit.group(0)}")')
 
 @pytest.fixture()
 def output_checker(request):

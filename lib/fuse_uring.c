@@ -5,7 +5,7 @@
  * Implementation of (most of) FUSE-over-io-uring.
  *
  * This program can be distributed under the terms of the GNU LGPLv2.
- * See the file COPYING.LIB
+ * See the file LGPL2.txt
  */
 
 #define _GNU_SOURCE
@@ -18,6 +18,7 @@
 #include <liburing.h>
 #include <sys/sysinfo.h>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
@@ -77,6 +78,15 @@ struct fuse_ring_pool {
 
 	/* size of a single queue */
 	size_t queue_mem_size;
+
+	unsigned int started_threads;
+	unsigned int failed_threads;
+
+	/* Avoid sending queue entries before FUSE_INIT reply*/
+	sem_t init_sem;
+
+	pthread_cond_t thread_start_cond;
+	pthread_mutex_t thread_start_mutex;
 
 	/* pointer to the first queue */
 	struct fuse_ring_queue *queues;
@@ -171,12 +181,36 @@ static int fuse_uring_commit_sqe(struct fuse_ring_pool *ring_pool,
 				    ring_ent->req_commit_id);
 
 	if (se->debug) {
-		fuse_log(FUSE_LOG_DEBUG, "    unique: %llu, result=%d\n",
+		fuse_log(FUSE_LOG_DEBUG, "    unique: %" PRIu64 ", result=%d\n",
 			 out->unique, ent_in_out->payload_sz);
 	}
 
 	/* XXX: This needs to be a ring config option */
 	io_uring_submit(&queue->ring);
+
+	return 0;
+}
+
+int fuse_req_get_payload(fuse_req_t req, char **payload, size_t *payload_sz,
+			 void **mr)
+{
+	struct fuse_ring_ent *ring_ent;
+
+	/* Not possible without io-uring interface */
+	if (!req->flags.is_uring)
+		return -EINVAL;
+
+	ring_ent = container_of(req, struct fuse_ring_ent, req);
+
+	*payload = ring_ent->op_payload;
+	*payload_sz = ring_ent->req_payload_sz;
+
+	/*
+	 * For now unused, but will be used later when the application can
+	 * allocate the buffers itself and register them for rdma.
+	 */
+	if (mr)
+		*mr = NULL;
 
 	return 0;
 }
@@ -200,7 +234,8 @@ int send_reply_uring(fuse_req_t req, int error, const void *arg, size_t argsize)
 			 argsize, max_payload_sz);
 		error = -EINVAL;
 	} else if (argsize) {
-		memcpy(ring_ent->op_payload, arg, argsize);
+		if (arg != ring_ent->op_payload)
+			memcpy(ring_ent->op_payload, arg, argsize);
 	}
 	ent_in_out->payload_sz = argsize;
 
@@ -345,9 +380,15 @@ static void fuse_session_destruct_uring(struct fuse_ring_pool *fuse_ring)
 			fuse_uring_get_queue(fuse_ring, qid);
 
 		if (queue->tid != 0) {
-			int value = 1;
+			uint64_t value = 1ULL;
+			int rc;
 
-			write(queue->eventfd, &value, sizeof(value));
+			rc = write(queue->eventfd, &value, sizeof(value));
+			if (rc != sizeof(value))
+				fprintf(stderr,
+					"Wrote to eventfd=%d err=%s: rc=%d\n",
+					queue->eventfd, strerror(errno), rc);
+			pthread_cancel(queue->tid);
 			pthread_join(queue->tid, NULL);
 			queue->tid = 0;
 		}
@@ -369,6 +410,8 @@ static void fuse_session_destruct_uring(struct fuse_ring_pool *fuse_ring)
 	}
 
 	free(fuse_ring->queues);
+	pthread_cond_destroy(&fuse_ring->thread_start_cond);
+	pthread_mutex_destroy(&fuse_ring->thread_start_mutex);
 	free(fuse_ring);
 }
 
@@ -411,12 +454,12 @@ static int fuse_uring_prepare_fetch_sqes(struct fuse_ring_queue *queue)
 	sq_ready = io_uring_sq_ready(&queue->ring);
 	if (sq_ready != ring_pool->queue_depth) {
 		fuse_log(FUSE_LOG_ERR,
-			 "SQE ready mismatch, expected %d got %d\n",
+			 "SQE ready mismatch, expected %zu got %u\n",
 			 ring_pool->queue_depth, sq_ready);
 		return -EINVAL;
 	}
 
-	// Add the poll SQE for the eventfd to wake up on teardown
+	/* Poll SQE for the eventfd to wake up on teardown */
 	sqe = io_uring_get_sqe(&queue->ring);
 	if (sqe == NULL) {
 		fuse_log(FUSE_LOG_ERR, "Failed to get eventfd SQE");
@@ -426,7 +469,7 @@ static int fuse_uring_prepare_fetch_sqes(struct fuse_ring_queue *queue)
 	io_uring_prep_poll_add(sqe, queue->eventfd, POLLIN);
 	io_uring_sqe_set_data(sqe, (void *)(uintptr_t)queue->eventfd);
 
-	io_uring_submit(&queue->ring);
+	/* Only preparation until here, no submission yet */
 
 	return 0;
 }
@@ -476,6 +519,10 @@ static struct fuse_ring_pool *fuse_create_ring(struct fuse_session *se)
 		queue->ring_pool = fuse_ring;
 	}
 
+	pthread_cond_init(&fuse_ring->thread_start_cond, NULL);
+	pthread_mutex_init(&fuse_ring->thread_start_mutex, NULL);
+	sem_init(&fuse_ring->init_sem, 0, 0);
+
 	return fuse_ring;
 
 err:
@@ -513,9 +560,13 @@ static void fuse_uring_handle_cqe(struct fuse_ring_queue *queue,
 		abort();
 	}
 
-	req->is_uring = true;
+	memset(&req->flags, 0, sizeof(req->flags));
+	memset(&req->u, 0, sizeof(req->u));
+	req->flags.is_uring = 1;
 	req->ref_cnt++;
 	req->ch = NULL; /* not needed for uring */
+	req->interrupted = 0;
+	list_init_req(req);
 
 	fuse_session_process_uring_cqe(fuse_ring->se, req, in, &rrh->op_in,
 				       ent->op_payload, ent_in_out->payload_sz);
@@ -547,8 +598,8 @@ static int fuse_uring_queue_handle_cqes(struct fuse_ring_queue *queue)
 			//fuse_log(FUSE_LOG_ERR, "cqe res: %d\n", cqe->res);
 
 			/* -ENOTCONN is ok on umount  */
-			if (err != -EINTR && err != -EOPNOTSUPP &&
-			    err != -EAGAIN && err != -ENOTCONN) {
+			if (err != -EINTR && err != -EAGAIN &&
+			    err != -ENOTCONN) {
 				se->error = cqe->res;
 
 				/* return first error */
@@ -649,8 +700,9 @@ static int fuse_uring_init_queue(struct fuse_ring_queue *queue)
 
 		req->se = se;
 		pthread_mutex_init(&req->lock, NULL);
-		req->is_uring = true;
-		req->ref_cnt = 1;
+		req->flags.is_uring = 1;
+		req->ref_cnt = 1; /* extra ref to avoid destruction */
+		list_init_req(req);
 	}
 
 	res = fuse_uring_prepare_fetch_sqes(queue);
@@ -679,38 +731,40 @@ static void *fuse_uring_thread(void *arg)
 
 	snprintf(thread_name, 16, "fuse-ring-%d", queue->qid);
 	thread_name[15] = '\0';
-	fuse_set_thread_name(pthread_self(), thread_name);
+	fuse_set_thread_name(thread_name);
 
 	fuse_uring_set_thread_core(queue->qid);
 
 	err = fuse_uring_init_queue(queue);
+	pthread_mutex_lock(&ring_pool->thread_start_mutex);
+	if (err < 0)
+		ring_pool->failed_threads++;
+	ring_pool->started_threads++;
+	pthread_cond_broadcast(&ring_pool->thread_start_cond);
+	pthread_mutex_unlock(&ring_pool->thread_start_mutex);
+
 	if (err < 0) {
 		fuse_log(FUSE_LOG_ERR, "qid=%d queue setup failed\n",
 			 queue->qid);
-		goto err;
+		goto err_non_fatal;
 	}
+
+	sem_wait(&ring_pool->init_sem);
 
 	/* Not using fuse_session_exited(se), as that cannot be inlined */
 	while (!atomic_load_explicit(&se->mt_exited, memory_order_relaxed)) {
 		io_uring_submit_and_wait(&queue->ring, 1);
 
 		err = fuse_uring_queue_handle_cqes(queue);
-		if (err < 0) {
-			/*
-			 * fuse-over-io-uring is not supported, operation can
-			 * continue over /dev/fuse
-			 */
-			if (err == -EOPNOTSUPP)
-				goto ret;
+		if (err < 0)
 			goto err;
-		}
 	}
 
 	return NULL;
 
 err:
 	fuse_session_exit(se);
-ret:
+err_non_fatal:
 	return NULL;
 }
 
@@ -729,8 +783,13 @@ static int fuse_uring_start_ring_threads(struct fuse_ring_pool *ring)
 	return rc;
 }
 
-static int fuse_uring_sanity_check(void)
+static int fuse_uring_sanity_check(struct fuse_session *se)
 {
+	if (se->uring.q_depth == 0) {
+		fuse_log(FUSE_LOG_ERR, "io-uring queue depth must be > 0\n");
+		return -EINVAL;
+	}
+
 	_Static_assert(sizeof(struct fuse_uring_cmd_req) <=
 		       FUSE_URING_MAX_SQE128_CMD_DATA,
 		       "SQE128_CMD_DATA has 80B cmd data");
@@ -743,18 +802,43 @@ int fuse_uring_start(struct fuse_session *se)
 	int err = 0;
 	struct fuse_ring_pool *fuse_ring;
 
-	fuse_uring_sanity_check();
+	fuse_uring_sanity_check(se);
 
 	fuse_ring = fuse_create_ring(se);
 	if (fuse_ring == NULL) {
 		err = -EADDRNOTAVAIL;
-		goto out;
+		goto err;
 	}
 
 	se->uring.pool = fuse_ring;
 
+	/* Hold off threads from send fuse ring entries (SQEs) */
+	sem_init(&fuse_ring->init_sem, 0, 0);
+	pthread_cond_init(&fuse_ring->thread_start_cond, NULL);
+	pthread_mutex_init(&fuse_ring->thread_start_mutex, NULL);
+
 	err = fuse_uring_start_ring_threads(fuse_ring);
-out:
+	if (err)
+		goto err;
+
+	/*
+	 * Wait for all threads to start or to fail
+	 */
+	pthread_mutex_lock(&fuse_ring->thread_start_mutex);
+	while (fuse_ring->started_threads < fuse_ring->nr_queues)
+		pthread_cond_wait(&fuse_ring->thread_start_cond,
+				  &fuse_ring->thread_start_mutex);
+
+	if (fuse_ring->failed_threads != 0)
+		err = -EADDRNOTAVAIL;
+	pthread_mutex_unlock(&fuse_ring->thread_start_mutex);
+
+err:
+	if (err) {
+		/* Note all threads need to have been started */
+		fuse_session_destruct_uring(fuse_ring);
+		se->uring.pool = fuse_ring;
+	}
 	return err;
 }
 
@@ -768,4 +852,13 @@ int fuse_uring_stop(struct fuse_session *se)
 	fuse_session_destruct_uring(ring);
 
 	return 0;
+}
+
+void fuse_uring_wake_ring_threads(struct fuse_session *se)
+{
+	struct fuse_ring_pool *ring = se->uring.pool;
+
+	/* Wake up the threads to let them send SQEs */
+	for (size_t qid = 0; qid < ring->nr_queues; qid++)
+		sem_post(&ring->init_sem);
 }

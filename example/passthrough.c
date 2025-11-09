@@ -4,7 +4,7 @@
   Copyright (C) 2011       Sebastian Pipping <sebastian@pipping.org>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 /** @file
@@ -27,7 +27,7 @@
     #undef FUSE_USE_VERSION
 #endif
 
-#define FUSE_USE_VERSION 31
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #ifdef HAVE_CONFIG_H
 #include "fuse_config.h"
@@ -50,10 +50,6 @@
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
-#ifdef __FreeBSD__
-#include <sys/socket.h>
-#include <sys/un.h>
-#endif
 #include <sys/time.h>
 #ifdef HAVE_SETXATTR
 #include <sys/xattr.h>
@@ -409,7 +405,6 @@ static int xmp_fsync(const char *path, int isdatasync,
 	return 0;
 }
 
-#ifdef HAVE_POSIX_FALLOCATE
 static int xmp_fallocate(const char *path, int mode,
 			off_t offset, off_t length, struct fuse_file_info *fi)
 {
@@ -417,9 +412,6 @@ static int xmp_fallocate(const char *path, int mode,
 	int res;
 
 	(void) fi;
-
-	if (mode)
-		return -EOPNOTSUPP;
 
 	if(fi == NULL)
 		fd = open(path, O_WRONLY);
@@ -429,13 +421,12 @@ static int xmp_fallocate(const char *path, int mode,
 	if (fd == -1)
 		return -errno;
 
-	res = -posix_fallocate(fd, offset, length);
+	res = do_fallocate(fd, mode, offset, length);
 
 	if(fi == NULL)
 		close(fd);
 	return res;
 }
-#endif
 
 #ifdef HAVE_SETXATTR
 /* xattr operations are optional and can safely be left unimplemented */
@@ -538,6 +529,24 @@ static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file
 	return res;
 }
 
+#ifdef HAVE_STATX
+static int xmp_statx(const char *path, int flags, int mask, struct statx *stxbuf,
+		     struct fuse_file_info *fi)
+{
+	int fd = -1;
+	int res;
+
+	if (fi)
+		fd = fi->fh;
+
+	res = statx(fd, path, flags | AT_SYMLINK_NOFOLLOW, mask, stxbuf);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+#endif
+
 static const struct fuse_operations xmp_oper = {
 	.init           = xmp_init,
 	.getattr	= xmp_getattr,
@@ -564,9 +573,7 @@ static const struct fuse_operations xmp_oper = {
 	.statfs		= xmp_statfs,
 	.release	= xmp_release,
 	.fsync		= xmp_fsync,
-#ifdef HAVE_POSIX_FALLOCATE
 	.fallocate	= xmp_fallocate,
-#endif
 #ifdef HAVE_SETXATTR
 	.setxattr	= xmp_setxattr,
 	.getxattr	= xmp_getxattr,
@@ -577,6 +584,9 @@ static const struct fuse_operations xmp_oper = {
 	.copy_file_range = xmp_copy_file_range,
 #endif
 	.lseek		= xmp_lseek,
+#ifdef HAVE_STATX
+	.statx		= xmp_statx,
+#endif
 };
 
 int main(int argc, char *argv[])
