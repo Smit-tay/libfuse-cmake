@@ -83,6 +83,11 @@ set(CMAKE_REQUIRED_DEFINITIONS "-D_GNU_SOURCE")
 
 set(include_default "stdio.h;stdlib.h;stddef.h;unistd.h;sys/types.h;sys/stat.h;fcntl.h")
 
+# Check for sys/xattr.h
+check_include_file(sys/xattr.h HAVE_SYS_XATTR_H)
+# Check for linux/limits.h
+check_include_file(linux/limits.h HAVE_LINUX_LIMITS_H)
+
 # Fork is actually implemented in the kernel.
 # It is declared as an external in "unistd.h"
 # Possibly because of that, testing with check_symbol_exists

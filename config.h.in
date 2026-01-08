@@ -1,5 +1,8 @@
 #pragma once
 
+#cmakedefine HAVE_SYS_XATTR_H
+#cmakedefine HAVE_LINUX_LIMITS_H
+
 #define HAVE_COPY_FILE_RANGE @HAVE_COPY_FILE_RANGE@
 
 #define HAVE_FALLOCATE @HAVE_FALLOCATE@

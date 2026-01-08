@@ -36,7 +36,7 @@
 
 int main(void)
 {
-	static const char hex_map[] = "0123456789ABCDEF";
+	static const char hex_map[FSEL_FILES] __attribute__((nonstring)) = "0123456789ABCDEF";
 	int fds[FSEL_FILES];
 	int i, nfds, tries;
 

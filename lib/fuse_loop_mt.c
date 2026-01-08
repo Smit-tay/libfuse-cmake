@@ -350,8 +350,8 @@ static int fuse_loop_start_thread(struct fuse_mt *mt)
 		return -1;
 	}
 	list_add_worker(w, &mt->main);
-	mt->numavail++;
-	mt->numworker++;
+	mt->numavail ++;
+	mt->numworker ++;
 
 	return 0;
 }
