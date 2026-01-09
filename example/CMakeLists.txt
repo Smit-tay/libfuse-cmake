@@ -11,8 +11,8 @@ endif()
 
 set(EXAMPLES passthrough passthrough_fh
              hello hello_ll
-             printcap ioctl_client poll_client
-             ioctl cuse cuse_client)
+             printcap ioctl_client ioctl_ll_client poll_client
+             ioctl ioctl_ll cuse cuse_client)
 
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "bsd$" AND NOT ${CMAKE_SYSTEM_NAME} STREQUAL "dragonfly")
     list(APPEND EXAMPLES passthrough_ll)

@@ -5,8 +5,9 @@
 cmake_minimum_required (VERSION 3.12.0)
 set (CMAKE_VERBOSE_MAKEFILE FALSE)
 
+### NOTE: CMake rc0 is invalid - we drop it with impunity
 project (libfuse3
-         VERSION 3.17.0
+         VERSION 3.19.0 
          DESCRIPTION "The CMake implementation of the Linux FUSE (Filesystem in Userspace) interface"
          HOMEPAGE_URL https://github.com/Smit-tay/libfuse-cmake
          LANGUAGES C CXX)

@@ -50,6 +50,10 @@ target_sources(test_signals PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_signals.c)
 target_include_directories(test_signals PUBLIC ${INCLUDE_DIRS})
 target_link_libraries(test_signals fuse3 ${CMAKE_THREAD_LIBS_INIT})
 
+add_executable(test_teardown_watchdog)
+target_sources(test_teardown_watchdog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_teardown_watchdog.c)
+target_include_directories(test_teardown_watchdog PUBLIC ${INCLUDE_DIRS})
+target_link_libraries(test_teardown_watchdog fuse3 ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(test_abi)
 target_sources(test_abi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_abi.c)
