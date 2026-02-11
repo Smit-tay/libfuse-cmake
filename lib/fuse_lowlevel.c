@@ -2574,6 +2574,24 @@ static void do_statx(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	_do_statx(req, nodeid, inarg, NULL);
 }
 
+static void _do_syncfs(fuse_req_t req, const fuse_ino_t nodeid,
+				const void *op_in, const void *in_payload)
+{
+	(void)op_in;
+	(void)in_payload;
+
+	if (req->se->op.syncfs)
+		req->se->op.syncfs(req, nodeid);
+	else
+		fuse_reply_err(req, ENOSYS);
+}
+
+static void do_syncfs(fuse_req_t req, const fuse_ino_t nodeid,
+			const void *inarg)
+{
+	_do_syncfs(req, nodeid, inarg, NULL);
+}
+
 static bool want_flags_valid(uint64_t capable, uint64_t want)
 {
 	uint64_t unknown_flags = want & (~capable);
@@ -3368,6 +3386,30 @@ int fuse_lowlevel_notify_retrieve(struct fuse_session *se, fuse_ino_t ino,
 	return err;
 }
 
+int fuse_lowlevel_notify_prune(struct fuse_session *se,
+			       fuse_ino_t *nodeids, uint32_t count)
+{
+	struct fuse_notify_prune_out outarg;
+	struct iovec iov[3];
+
+	if (!se)
+		return -EINVAL;
+
+	if (se->conn.proto_minor < 45)
+		return -ENOSYS;
+
+	outarg.count = count;
+	outarg.padding = 0;
+	outarg.spare = 0;
+
+	iov[1].iov_base = &outarg;
+	iov[1].iov_len = sizeof(outarg);
+	iov[2].iov_base = (void *)nodeids;
+	iov[2].iov_len = sizeof(fuse_ino_t) * count;
+
+	return send_notify_iov(se, FUSE_NOTIFY_PRUNE, iov, 3);
+}
+
 void *fuse_req_userdata(fuse_req_t req)
 {
 	return req->se->userdata;
@@ -3470,6 +3512,7 @@ static struct {
 	[FUSE_COPY_FILE_RANGE] = { do_copy_file_range, "COPY_FILE_RANGE" },
 	[FUSE_COPY_FILE_RANGE_64] = { do_copy_file_range_64, "COPY_FILE_RANGE_64" },
 	[FUSE_LSEEK]	   = { do_lseek,       "LSEEK"	     },
+	[FUSE_SYNCFS]	   = { do_syncfs,      "SYNCFS"      },
 	[FUSE_STATX]	   = { do_statx,       "STATX"	     },
 	[CUSE_INIT]	   = { cuse_lowlevel_init, "CUSE_INIT"   },
 };
@@ -3526,6 +3569,7 @@ static struct {
 	[FUSE_COPY_FILE_RANGE]	= { _do_copy_file_range, "COPY_FILE_RANGE" },
 	[FUSE_COPY_FILE_RANGE_64]	= { _do_copy_file_range_64, "COPY_FILE_RANGE_64" },
 	[FUSE_LSEEK]		= { _do_lseek,		"LSEEK" },
+	[FUSE_SYNCFS]		= { _do_syncfs,		"SYNCFS" },
 	[FUSE_STATX]		= { _do_statx,		"STATX" },
 	[CUSE_INIT]		= { _cuse_lowlevel_init, "CUSE_INIT" },
 };
@@ -4585,7 +4629,7 @@ restart:
 		} else if (res > 0) {
 			/* Check for POLLERR on session fd */
 			if (session_fd_idx >= 0 &&
-			    pfds[session_fd_idx].revents & POLLERR) {
+			    pfds[session_fd_idx].revents & (POLLERR | POLLNVAL)) {
 				fuse_tt_pollerr_handler(tt);
 
 				/* Timeout for hard exit */
@@ -4598,6 +4642,18 @@ restart:
 				/* Teardown requested, exit thread */
 				break;
 			}
+		}
+
+		if (unlikely(poll_timeout == -1)) {
+			fuse_log(
+				FUSE_LOG_ERR,
+				"FUSE teardown watchdog Unhandled poll result session fd: %d eventfd: %d.\n"
+				"Terminating the watchdog.\n",
+				session_fd_idx >= 0 ?
+					pfds[session_fd_idx].revents :
+					-1,
+				pfds[eventfd_idx].revents);
+			break;
 		}
 
 		/*

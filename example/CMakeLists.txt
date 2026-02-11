@@ -28,7 +28,8 @@ set(THREADED_EXAMPLES notify_inval_inode
                       invalidate_path
                       notify_store_retrieve
                       notify_inval_entry
-                      poll)
+                      poll
+                      notify_prune)
 
 foreach( EXAMPLE ${EXAMPLES} )
     add_executable(${EXAMPLE} ${EXAMPLE}.c)
