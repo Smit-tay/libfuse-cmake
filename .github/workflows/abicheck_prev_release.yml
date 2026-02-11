@@ -59,7 +59,7 @@ jobs:
           ls -la $(/bin/pwd)
           ls -la "${{ github.workspace }}"     # ← list root contents
           ls -la "${{ github.workspace }}/.."  # ← see if 'previous' is sibling          
-          pip install -r ../../requirements.txt   # runs at workspace root
+          pip install -r ./requirements.txt   # runs at workspace root
           meson setup build --buildtype=debug
           meson compile -C build
 
