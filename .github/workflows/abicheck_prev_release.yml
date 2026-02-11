@@ -28,11 +28,6 @@ jobs:
           sudo apt-get update
           sudo apt-get -y install abigail-tools clang gcc liburing-dev libnuma-dev
           pip install --upgrade pip
-          echo "Current directory: $(/bin/pwd)"
-          echo "github.workspace: ${{ github.workspace }}"
-          ls -la "${{ github.workspace }}"     # ← list root contents
-          ls -la "${{ github.workspace }}/.."  # ← see if 'previous' is sibling          
-          pip install -r ../../requirements.txt   # runs at workspace root
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -59,6 +54,12 @@ jobs:
       - name: Build current
         working-directory: current
         run: |
+          echo "Current directory: $(/bin/pwd)"
+          echo "github.workspace: ${{ github.workspace }}"
+          ls -la $(/bin/pwd)"
+          ls -la "${{ github.workspace }}"     # ← list root contents
+          ls -la "${{ github.workspace }}/.."  # ← see if 'previous' is sibling          
+          pip install -r ../../requirements.txt   # runs at workspace root
           meson setup build --buildtype=debug
           meson compile -C build
 
