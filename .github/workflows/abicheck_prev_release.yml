@@ -56,7 +56,7 @@ jobs:
         run: |
           echo "Current directory: $(/bin/pwd)"
           echo "github.workspace: ${{ github.workspace }}"
-          ls -la $(/bin/pwd)"
+          ls -la $(/bin/pwd)
           ls -la "${{ github.workspace }}"     # ← list root contents
           ls -la "${{ github.workspace }}/.."  # ← see if 'previous' is sibling          
           pip install -r ../../requirements.txt   # runs at workspace root
