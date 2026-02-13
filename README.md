@@ -7,6 +7,8 @@ About
 This is a fork of the libfuse reference implementation which may be found here:
 [https://github.com/libfuse/libfuse](https://github.com/libfuse/libfuse)
 
+NOTE: Not all upstream release tags are present - that's a GitHub PITA issue that doesn't seem to be easily automated.
+
 This fork is designed to build with **CMake**, otherwise it should be identical to
 the reference platform.  The best reference for using libfuse is the reference
 implementation.  BUT - This is the place to come for information about building
