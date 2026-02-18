@@ -5,10 +5,11 @@ on:
   push:
     branches:
       - master
+      - 'fuse-[0-9]+.[0-9]+*'  # This will match branches like 3.17, 3.18, 4.0, etc.
   pull_request:
     branches:
       - master
-
+      - 'fuse-[0-9]+.[0-9]+*'
 permissions:
   contents: read
 
@@ -25,18 +26,18 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get -y install abigail-tools clang gcc
+          sudo apt-get -y install abigail-tools clang gcc liburing-dev libnuma-dev
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: current
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: previous
           ref: ${{ github.event.pull_request.base.ref }}
 
-      - uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: '3.12'
 
@@ -56,8 +57,10 @@ jobs:
           meson compile -C build
 
       - name: Run abidiff
-        run: abidiff 
-          --headers-dir1 previous/include/ 
-          --headers-dir2 current/include/ 
-          previous/build/lib/libfuse3.so 
+        run: abidiff
+          --no-added-syms
+          --suppressions current/.github/workflows/abidiff_suppressions.abignore
+          --headers-dir1 previous/include/
+          --headers-dir2 current/include/
+          previous/build/lib/libfuse3.so
           current/build/lib/libfuse3.so

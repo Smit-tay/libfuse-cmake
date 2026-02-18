@@ -10,12 +10,13 @@ if( DEFINED NDEBUG )
 endif()
 
 set(EXAMPLES passthrough passthrough_fh
-             hello hello_ll hello_ll_uds
-             printcap ioctl_client poll_client
-             ioctl cuse cuse_client)
+             hello hello_ll
+             printcap ioctl_client ioctl_ll_client poll_client
+             ioctl ioctl_ll cuse cuse_client)
 
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "bsd$" AND NOT ${CMAKE_SYSTEM_NAME} STREQUAL "dragonfly")
     list(APPEND EXAMPLES passthrough_ll)
+    list(APPEND EXAMPLES hello_ll_uds)
 
     # According to Conrad Meyer <cem@freebsd.org>, FreeBSD doesn't
     # support mounting files, This is enforced in vfs_domount_first()
@@ -27,7 +28,8 @@ set(THREADED_EXAMPLES notify_inval_inode
                       invalidate_path
                       notify_store_retrieve
                       notify_inval_entry
-                      poll)
+                      poll
+                      notify_prune)
 
 foreach( EXAMPLE ${EXAMPLES} )
     add_executable(${EXAMPLE} ${EXAMPLE}.c)
@@ -51,6 +53,8 @@ if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "bsd$" AND NOT ${CMAKE_SYSTEM_NAME} STREQUA
         list(REMOVE_ITEM _target_cxx_flags -Wstrict-prototypes)
         set_target_properties(passthrough_hp PROPERTIES COMPILE_OPTIONS "${_target_cxx_flags}")
     endif()
+     add_executable(memfs_ll memfs_ll.cc)
+     target_link_libraries(memfs_ll  ${CMAKE_THREAD_LIBS_INIT} fuse3)
 endif()
 
 # TODO: Link passthrough_fh with ulockmgr if available

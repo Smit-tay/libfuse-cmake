@@ -1,10 +1,130 @@
-libfuse 3.17 (unreleased)
-========================
+libfuse 3.18.0 (2025-12-18)
+===========================
 
+New Features
+------------
+
+* fuse-over-io-uring communication
+* statx support
+* Request timeouts: Prevent hung operations
+* FUSE_NOTIFY_INC_EPOCH: New notification mechanism for epoch counters
+
+Important Fixes
+----------------
+
+* Fixed double unmount on FUSE_DESTROY
+* Fixed junk readdirplus results when filesystem doesn't fill stat info
+* Fixed memory deallocation in fuse_session_loop_remember
+* Fixed COPY_FILE_RANGE interface
+
+Platform Support
+----------------
+
+* Improved FreeBSD support (mount error reporting, test runner, build fixes)
+* Fixed 32-bit architecture builds
+* Fixed build with musl libc and older kernels (< 5.9)
+
+Other Improvements
+------------------
+
+* Added PanFS to fusermount whitelist
+* Thread naming support for easier debugging
+
+
+libfuse 3.17.4 (2025-08-19)
+===========================
+- Try to detect mount-utils by checking for /run/mount/utab
+  and don't try to update mtab if it does not exist
+- Fix a build warning when HAVE_BACKTRACE is undefined
+- fuse_loop_mt.c: fix close-on-exec flag on clone fd
+- Remove struct size assertions from fuse_common.h
+
+libfuse 3.17.3 (2025-07-16)
+===========================
+* more conn->want / conn->want_ext conversion fixes
+* Fix feature detection for close_range
+* Avoid double unmount on FUSE_DESTROY
+
+libfuse 3.17.2 (2025-04-23)
+===========================
+* Fixed uninitized bufsize value (compilation warning and real
+  issue when HAVE_SPLICE was not defined)
+* Fixed initialization races related to buffer realocation when
+  large buf sizes are used (/proc/sys/fs/fuse/max_pages_limit)
+* Fix build with kernel < 5.9
+* Fix static_assert build failure with C++ version < 11
+* Compilation fix (remove second fuse_main_real_versioned declaration)
+* Another conn.want flag conversion fix for high-level applications
+* Check if pthread_setname_np() exists before use it
+* fix example/memfs_ll rename deadlock error
+* signal handlers: Store fuse_session unconditionally and restore
+  previous behavior that with multiple sessions the last session
+  was used for the signal exist handler
+
+libfuse 3.17.1 (2025-03-24)
+===========================
+* fuse: Fix want conn.want flag conversion
+* Prevent re-usage of stdio FDs for fusermount
+* PanFS added to fusermount whitelist
+
+libfuse 3.17.1-rc1 (2025-02-18)
+===============================
+* several BSD fixes
+* x86 (32bit) build fixes
+* nested declarations moved out of the inlined functions to avoid
+  build warnings
+* signify public key added for future 3.18
+
+libfuse 3.17.1-rc0 (2025-02.10)
+===============================
+
+* Fix libfuse build with FUSE_USE_VERSION 30
+* Fix build of memfs_ll without manual meson reconfigure
+* Fix junk readdirplus results when filesystem not filling stat info
+* Fix conn.want_ext truncation to 32bit
+* Fix some build warnings with -Og
+* Fix fuse_main_real symbols
+* Several changes related to functions/symbols that added in
+  the libfuse version in 3.17
+* Add thread names to libfuse threads
+* With auto-umounts the FUSE_COMMFD2 (parent process fd is
+  exported to be able to silence leak checkers
+
+
+libfuse 3.17 (2025-01-01, not officially releaesed)
+==================================================
+
+* 3.11 and 3.14.2 introduced ABI incompatibilities, the ABI is restored
+  to 3.10, .so version was increased since there were releases with
+  the incompatible ABI
+
+* The libfuse version a program was compiled against is now encoded into
+  that program, using inlined functions in fuse_lowlevel.h and fuse.h
 * Allows to handle fatal signals and to print a backtrace.
-  New public function: fuse_set_fail_signal_handlers()
+  New API function: fuse_set_fail_signal_handlers()
+
 * Allows fuse_log() messages to be send to syslog instead of stderr
-  New public functions: fuse_log_enable_syslog() and fuse_log_close_syslog()
+  New API functions: fuse_log_enable_syslog() and fuse_log_close_syslog()
+
+* Handle buffer misalignment for FUSE_WRITE
+
+* Added support for filesystem passthrough read/write of files when
+  FUSE_PASSTHROUGH capability is enabled
+  New API functions:  fuse_passthrough_open() and fuse_passthrough_close(),
+                      also see example/passthrough_hp.cc
+
+* Added fmask and dmask options to high-level API
+  - dmask: umask applied to directories
+  - fmask: umask applied to non-directories
+
+* Added FUSE_FILL_DIR_DEFAULTS enum to support C++ programs using
+  fuse_fill_dir_t function
+
+* Added support for FUSE_CAP_HANDLE_KILLPRIV_V2
+
+Fixes:
+* Fixed compilation failure on FreeBSD (mount_bsd.c now points to correct
+  header)
 
 libfuse 3.16.2 (2023-10-10)
 ===========================

@@ -3,13 +3,22 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB
+  See the file LGPL2.txt
 */
+
+#ifndef LIB_FUSE_I_H_
+#define LIB_FUSE_I_H_
 
 #include "fuse.h"
 #include "fuse_lowlevel.h"
+#include "util.h"
 
+#include <pthread.h>
+#include <semaphore.h>
+#include <stdint.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <stdatomic.h>
 
 #define MIN(a, b) \
 ({									\
@@ -19,6 +28,7 @@
 })
 
 struct mount_opts;
+struct fuse_ring_pool;
 
 struct fuse_req {
 	struct fuse_session *se;
@@ -28,7 +38,11 @@ struct fuse_req {
 	struct fuse_ctx ctx;
 	struct fuse_chan *ch;
 	int interrupted;
-	unsigned int ioctl_64bit : 1;
+	struct {
+		unsigned int ioctl_64bit : 1;
+		unsigned int is_uring : 1;
+		unsigned int is_copy_file_range_64 : 1;
+	} flags;
 	union {
 		struct {
 			uint64_t unique;
@@ -50,9 +64,16 @@ struct fuse_notify_req {
 	struct fuse_notify_req *prev;
 };
 
+struct fuse_session_uring {
+	bool enable;
+	unsigned int q_depth;
+	struct fuse_ring_pool *pool;
+};
+
+struct fuse_timeout_thread;
+
 struct fuse_session {
-	char *mountpoint;
-	volatile int exited;
+	_Atomic(char *)mountpoint;
 	int fd;
 	struct fuse_custom_io *io;
 	struct mount_opts *mo;
@@ -72,14 +93,35 @@ struct fuse_session {
 	int broken_splice_nonblock;
 	uint64_t notify_ctr;
 	struct fuse_notify_req notify_list;
-	size_t bufsize;
+	_Atomic size_t bufsize;
 	int error;
 
-	/* This is useful if any kind of ABI incompatibility is found at
+	/*
+	 * This is useful if any kind of ABI incompatibility is found at
 	 * a later version, to 'fix' it at run time.
 	 */
 	struct libfuse_version version;
+
+	/* thread synchronization */
+	_Atomic bool mt_exited;
+	pthread_mutex_t mt_lock;
+	sem_t mt_finish;
+
+	/* true if reading requests from /dev/fuse are handled internally */
 	bool buf_reallocable;
+
+	/* io_uring */
+	struct fuse_session_uring uring;
+
+	/* timeout thread */
+	_Atomic(struct fuse_timeout_thread *) timeout_thread;
+
+	/*
+	 * conn->want and conn_want_ext options set by libfuse , needed
+	 * to correctly convert want to want_ext
+	 */
+	uint32_t conn_want;
+	uint64_t conn_want_ext;
 };
 
 struct fuse_chan {
@@ -183,15 +225,22 @@ int fuse_kern_mount(const char *mountpoint, struct mount_opts *mo);
 int fuse_send_reply_iov_nofree(fuse_req_t req, int error, struct iovec *iov,
 			       int count);
 void fuse_free_req(fuse_req_t req);
+void list_init_req(struct fuse_req *req);
 
+void _cuse_lowlevel_init(fuse_req_t req, const fuse_ino_t nodeid,
+			 const void *req_header, const void *req_payload);
 void cuse_lowlevel_init(fuse_req_t req, fuse_ino_t nodeide, const void *inarg);
 
 int fuse_start_thread(pthread_t *thread_id, void *(*func)(void *), void *arg);
 
-int fuse_session_receive_buf_int(struct fuse_session *se, struct fuse_buf *buf,
-				 struct fuse_chan *ch);
-void fuse_session_process_buf_int(struct fuse_session *se,
-				  const struct fuse_buf *buf, struct fuse_chan *ch);
+void fuse_buf_free(struct fuse_buf *buf);
+
+int fuse_session_receive_buf_internal(struct fuse_session *se,
+				      struct fuse_buf *buf,
+				      struct fuse_chan *ch);
+void fuse_session_process_buf_internal(struct fuse_session *se,
+				       const struct fuse_buf *buf,
+				       struct fuse_chan *ch);
 
 struct fuse *fuse_new_31(struct fuse_args *args, const struct fuse_operations *op,
 		      size_t op_size, void *private_data);
@@ -218,3 +267,5 @@ int fuse_loop_cfg_verify(struct fuse_loop_config *config);
 /* room needed in buffer to accommodate header */
 #define FUSE_BUFFER_HEADER_SIZE 0x1000
 
+
+#endif /* LIB_FUSE_I_H_*/

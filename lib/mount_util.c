@@ -5,7 +5,7 @@
   Architecture-independent mounting code.
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB.
+  See the file LGPL2.txt.
 */
 
 #include "fuse_config.h"
@@ -74,6 +74,10 @@ static int mtab_needs_update(const char *mnt)
 			setreuid(ruid, -1);
 
 		if (err == EROFS)
+			return 0;
+
+		res = access("/run/mount/utab", F_OK);
+		if (res == -1)
 			return 0;
 	}
 

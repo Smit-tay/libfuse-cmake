@@ -5,8 +5,9 @@
 cmake_minimum_required (VERSION 3.12.0)
 set (CMAKE_VERBOSE_MAKEFILE FALSE)
 
+### NOTE: CMake rc0 is invalid - we drop it with impunity
 project (libfuse3
-         VERSION 3.16.2
+         VERSION 3.19.0 
          DESCRIPTION "The CMake implementation of the Linux FUSE (Filesystem in Userspace) interface"
          HOMEPAGE_URL https://github.com/Smit-tay/libfuse-cmake
          LANGUAGES C CXX)
@@ -47,15 +48,18 @@ if (NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
 endif()
 
 set(CMAKE_C_STANDARD 11)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # This needs to be looked at - is linux=1 necessary ?
 add_compile_options("-Dlinux=1"
                     "-D_REENTRANT" "-DHAVE_CONFIG_H" "-D_GNU_SOURCE"
                     "-Wall" "-Wextra"
-                    "-Wmissing-declarations" "-Wno-sign-compare" "-Wstrict-prototypes" "-Wwrite-strings"
+                    "-Wmissing-declarations" "-Wno-sign-compare" "-Wwrite-strings"
                     "-fno-strict-aliasing")
+# C-specific compile options
+# Apply these only to C targets or files
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wstrict-prototypes")                 
 
 include(CheckIncludeFile)
 include(CheckIncludeFiles)
@@ -80,6 +84,11 @@ set(CMAKE_REQUIRED_DEFINITIONS "-D_GNU_SOURCE")
 
 set(include_default "stdio.h;stdlib.h;stddef.h;unistd.h;sys/types.h;sys/stat.h;fcntl.h")
 
+# Check for sys/xattr.h
+check_include_file(sys/xattr.h HAVE_SYS_XATTR_H)
+# Check for linux/limits.h
+check_include_file(linux/limits.h HAVE_LINUX_LIMITS_H)
+
 # Fork is actually implemented in the kernel.
 # It is declared as an external in "unistd.h"
 # Possibly because of that, testing with check_symbol_exists
@@ -98,6 +107,7 @@ check_symbol_exists("fdatasync"       ${include_default}    HAVE_FDATASYNC)
 check_symbol_exists("utimensat"       ${include_default}    HAVE_UTIMENSAT)
 check_symbol_exists("copy_file_range" ${include_default}    HAVE_COPY_FILE_RANGE)
 check_symbol_exists("fallocate"       ${include_default}    HAVE_FALLOCATE)
+check_symbol_exists("close_range"     ${include_default}    HAVE_CLOSE_RANGE)
 # For some reason the meson build checks these separately
 check_symbol_exists("setxattr" "sys/xattr.h" HAVE_SETXATTR)
 check_symbol_exists("iconv" "iconv.h" HAVE_ICONV)
@@ -167,11 +177,18 @@ set(COMPILE_ME [=[
             return 100; //printf("no need to escape\n");
     }
 ]=])
+
+set(TEST_FILE "${CMAKE_BINARY_DIR}/compile_me.c")
+
+# Write the C code to the file
+file(WRITE ${TEST_FILE} "${COMPILE_ME}")
+
 message(STATUS "Performing Test GETMNTENT_ESCAPING")
 try_run(
 	RUN_RESULT
 	COMPILE_RESULT
-	SOURCE_FROM_VAR "compile_me.cpp" COMPILE_ME
+	${CMAKE_BINARY_DIR}  # Binary Directory
+    ${TEST_FILE}         # Source File
 	LINK_OPTIONS -lmount
 	WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 	COMPILE_OUTPUT_VARIABLE COMPILE_OUT_TXT
@@ -210,9 +227,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/lib)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/test)
 
-option(OPTION_BUILD_UTILS "Also build utils and docs" OFF)
+option(OPTION_BUILD_UTILS "Also build utils and docs" ON)
 
-option(OPTION_BUILD_UTILS "Also build utils and docs" OFF)
 if(OPTION_BUILD_UTILS)
   if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "BSD" AND NOT  ${CMAKE_SYSTEM_NAME} MATCHES "DRAGONFLY" )
     message("Also building utils and docs")
@@ -223,7 +239,7 @@ else()
   message("NOT building utils and docs")
 endif()
 
-option(OPTION_BUILD_EXAMPLES "Also build examples" OFF)
+option(OPTION_BUILD_EXAMPLES "Also build examples" ON)
 if(OPTION_BUILD_EXAMPLES)
   message("Also building examples")
   add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/example)

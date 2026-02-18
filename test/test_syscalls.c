@@ -13,6 +13,7 @@
 #include <utime.h>
 #include <errno.h>
 #include <assert.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -775,7 +776,7 @@ static int test_seekdir(void)
 	int i;
 	int res;
 	DIR *dp;
-	struct dirent *de;
+	struct dirent *de = NULL;
 
 	start_test("seekdir");
 	res = create_dir(testdir, testdir_files);
@@ -918,6 +919,53 @@ static int test_copy_file_range(void)
 }
 #else
 static int test_copy_file_range(void)
+{
+	return 0;
+}
+#endif
+
+#ifdef HAVE_STATX
+static int test_statx(void)
+{
+	struct statx sb;
+	char msg[] = "hi";
+	size_t msg_size = sizeof(msg);
+	struct timespec tp;
+	int res;
+
+	memset(&sb, 0, sizeof(sb));
+	unlink(testfile);
+
+	start_test("statx");
+
+	res = create_testfile(testfile, msg, msg_size);
+	if (res == -1)
+		return -1;
+
+	res = statx(-1, testfile, AT_EMPTY_PATH,
+		    STATX_BASIC_STATS | STATX_BTIME, &sb);
+	if (res == -1)
+		return -1;
+
+	if (sb.stx_size != msg_size)
+		return -1;
+
+	clock_gettime(CLOCK_REALTIME, &tp);
+
+	if (sb.stx_btime.tv_sec > tp.tv_sec)
+		return -1;
+
+	if (sb.stx_btime.tv_sec == tp.tv_sec &&
+	    sb.stx_btime.tv_nsec >= tp.tv_nsec)
+		return -1;
+
+	unlink(testfile);
+
+	success();
+	return 0;
+}
+#else
+static int test_statx(void)
 {
 	return 0;
 }
@@ -1067,7 +1115,6 @@ static int test_create_unlink(void)
 	return 0;
 }
 
-#ifndef __FreeBSD__
 static int test_mknod(void)
 {
 	int err = 0;
@@ -1100,7 +1147,6 @@ static int test_mknod(void)
 	success();
 	return 0;
 }
-#endif
 
 #define test_open(exist, flags, mode)  do_test_open(exist, flags, #flags, mode)
 
@@ -1794,7 +1840,6 @@ fail:
 #undef PATH
 }
 
-#ifndef __FreeBSD__
 static int test_mkfifo(void)
 {
 	int res;
@@ -1826,7 +1871,6 @@ static int test_mkfifo(void)
 	success();
 	return 0;
 }
-#endif
 
 static int test_mkdir(void)
 {
@@ -1959,6 +2003,7 @@ static int do_test_create_ro_dir(int flags, const char *flags_str)
 	return 0;
 }
 
+#ifndef __FreeBSD__
 /* 	this tests open with O_TMPFILE
 	note that this will only work with the fuse low level api 
 	you will get ENOTSUP with the high level api */
@@ -2056,6 +2101,7 @@ static int test_create_and_link_tmpfile(void)
 	success();
 	return 0;
 }
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -2120,10 +2166,8 @@ int main(int argc, char *argv[])
 	err += test_symlink();
 	err += test_link();
 	err += test_link2();
-#ifndef __FreeBSD__	
 	err += test_mknod();
 	err += test_mkfifo();
-#endif
 	err += test_mkdir();
 	err += test_rename_file();
 	err += test_rename_dir();
@@ -2185,8 +2229,11 @@ int main(int argc, char *argv[])
 	err += test_create_ro_dir(O_CREAT | O_WRONLY);
 	err += test_create_ro_dir(O_CREAT | O_TRUNC);
 	err += test_copy_file_range();
+	err += test_statx();
+#ifndef __FreeBSD__
 	err += test_create_tmpfile();
 	err += test_create_and_link_tmpfile();
+#endif
 
 	unlink(testfile2);
 	unlink(testsock);

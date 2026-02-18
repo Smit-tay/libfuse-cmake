@@ -18,13 +18,20 @@ import time
 import errno
 import sys
 import platform
-from looseversion import LooseVersion
+import re
+from packaging import version
 from tempfile import NamedTemporaryFile
 from contextlib import contextmanager
 from util import (wait_for_mount, umount, cleanup, base_cmdline,
                   safe_sleep, basename, fuse_test_marker, test_printcap,
-                  fuse_proto, fuse_caps, powerset)
+                  fuse_proto, fuse_caps, powerset, parse_kernel_version)
 from os.path import join as pjoin
+import logging
+from enum import Enum
+
+class InodeCheck(Enum):
+    EXACT = 1
+    NONZERO = 2
 
 pytestmark = fuse_test_marker()
 
@@ -42,8 +49,13 @@ if sys.platform == 'linux':
     options.append('clone_fd')
 
 def invoke_directly(mnt_dir, name, options):
-    cmdline = base_cmdline + [ pjoin(basename, 'example', name),
-                               '-f', mnt_dir, '-o', ','.join(options) ]
+    # Handle test/hello specially since it's not in example/
+    if name.startswith('test/'):
+        path = pjoin(basename, name)
+    else:
+        path = pjoin(basename, 'example', name)
+
+    cmdline = base_cmdline + [ path, '-f', mnt_dir, '-o', ','.join(options) ]
     if name == 'hello_ll':
         # supports single-threading only
         cmdline.append('-s')
@@ -88,35 +100,50 @@ def readdir_inode(dir):
 @pytest.mark.parametrize("options", powerset(options))
 @pytest.mark.parametrize("name", ('hello', 'hello_ll'))
 def test_hello(tmpdir, name, options, cmdline_builder, output_checker):
+    logger = logging.getLogger(__name__)
     mnt_dir = str(tmpdir)
+    logger.debug(f"Mount directory: {mnt_dir}")
+    cmdline = cmdline_builder(mnt_dir, name, options)
+    logger.debug(f"Command line: {' '.join(cmdline)}")
     mount_process = subprocess.Popen(
-        cmdline_builder(mnt_dir, name, options),
+        cmdline,
         stdout=output_checker.fd, stderr=output_checker.fd)
+    logger.debug(f"Mount process PID: {mount_process.pid}")
     try:
+        logger.debug("Waiting for mount...")
         wait_for_mount(mount_process, mnt_dir)
+        logger.debug("Mount completed")
         assert os.listdir(mnt_dir) == [ 'hello' ]
+        logger.debug("Verified 'hello' file exists in mount directory")
         filename = pjoin(mnt_dir, 'hello')
         with open(filename, 'r') as fh:
             assert fh.read() == 'Hello World!\n'
+        logger.debug("Verified contents of 'hello' file")
         with pytest.raises(IOError) as exc_info:
             open(filename, 'r+')
         assert exc_info.value.errno == errno.EACCES
+        logger.debug("Verified EACCES error when trying to open file for writing")
         with pytest.raises(IOError) as exc_info:
             open(filename + 'does-not-exist', 'r+')
         assert exc_info.value.errno == errno.ENOENT
+        logger.debug("Verified ENOENT error for non-existent file")
         if name == 'hello_ll':
+            logger.debug("Testing xattr for hello_ll")
             tst_xattr(mnt_dir)
             path = os.path.join(mnt_dir, 'hello')
             tst_xattr(path)
     except:
+        logger.error("Exception occurred during test", exc_info=True)
         cleanup(mount_process, mnt_dir)
         raise
     else:
+        logger.debug("Unmounting...")
         umount(mount_process, mnt_dir)
+        logger.debug("Test completed successfully")
 
 @pytest.mark.parametrize("writeback", (False, True))
 @pytest.mark.parametrize("name", ('passthrough', 'passthrough_plus',
-                           'passthrough_fh', 'passthrough_ll'))
+                           'passthrough_fh', 'passthrough_ll', 'passthrough_zero_ino'))
 @pytest.mark.parametrize("debug", (False, True))
 def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
     # Avoid false positives from libfuse debug messages
@@ -131,14 +158,30 @@ def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
     mnt_dir = str(short_tmpdir.mkdir('mnt'))
     src_dir = str(short_tmpdir.mkdir('src'))
 
+    inode_check = InodeCheck.EXACT
     if name == 'passthrough_plus':
         cmdline = base_cmdline + \
                   [ pjoin(basename, 'example', 'passthrough'),
                     '--plus', '-f', mnt_dir ]
-    else:
+    elif name == 'passthrough_zero_ino':
+        cmdline = base_cmdline + \
+                  [ pjoin(basename, 'example', 'passthrough'),
+                    '--plus', '--readdir-zero-inodes', '-f', mnt_dir ]
+        inode_check = InodeCheck.NONZERO
+    elif name == 'passthrough_ll':
+        cmdline = base_cmdline + \
+                  [ pjoin(basename, 'example', name),
+                    '-f', mnt_dir, '-o', 'timeout=0' ]
+    else:  # passthrough and passthrough_fh
         cmdline = base_cmdline + \
                   [ pjoin(basename, 'example', name),
                     '-f', mnt_dir ]
+
+    # Set all timeouts to 0 for everything except passthrough_ll
+    # (this includes passthrough, passthrough_plus, and passthrough_fh)
+    if name != 'passthrough_ll':
+        cmdline.extend(['-o', 'entry_timeout=0,negative_timeout=0,attr_timeout=0,ac_attr_timeout=0'])
+
     if debug:
         cmdline.append('-d')
 
@@ -147,7 +190,9 @@ def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
             pytest.skip('example does not support writeback caching')
         cmdline.append('-o')
         cmdline.append('writeback')
-        
+
+    print(f"\nDebug: Command line: {' '.join(cmdline)}")
+
     mount_process = subprocess.Popen(cmdline, stdout=output_checker.fd,
                                      stderr=output_checker.fd)
     try:
@@ -155,12 +200,12 @@ def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
         work_dir = mnt_dir + src_dir
 
         tst_statvfs(work_dir)
-        tst_readdir(src_dir, work_dir)
-        tst_readdir_big(src_dir, work_dir)
+        tst_readdir(src_dir, work_dir, inode_check)
+        tst_readdir_big(src_dir, work_dir, inode_check)
         tst_open_read(src_dir, work_dir)
         tst_open_write(src_dir, work_dir)
         tst_create(work_dir)
-        tst_passthrough(src_dir, work_dir)
+        tst_passthrough(src_dir, work_dir, inode_check)
         tst_append(src_dir, work_dir)
         tst_seek(src_dir, work_dir)
         tst_mkdir(work_dir)
@@ -173,7 +218,8 @@ def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
         # Underlying fs may not have full nanosecond resolution
         tst_utimens(work_dir, ns_tol=1000)
 
-        tst_link(work_dir)
+        if inode_check == InodeCheck.EXACT:
+            tst_link(work_dir)
         tst_truncate_path(work_dir)
         tst_truncate_fd(work_dir)
         tst_open_unlink(work_dir)
@@ -192,7 +238,6 @@ def test_passthrough(short_tmpdir, name, debug, output_checker, writeback):
     else:
         umount(mount_process, mnt_dir)
 
-##@pytest.mark.skip
 @pytest.mark.parametrize("cache", (False, True))
 def test_passthrough_hp(short_tmpdir, cache, output_checker):
     mnt_dir = str(short_tmpdir.mkdir('mnt'))
@@ -206,7 +251,7 @@ def test_passthrough_hp(short_tmpdir, cache, output_checker):
 
     if not cache:
         cmdline.append('--nocache')
-        
+
     mount_process = subprocess.Popen(cmdline, stdout=output_checker.fd,
                                      stderr=output_checker.fd)
     try:
@@ -252,7 +297,7 @@ def test_passthrough_hp(short_tmpdir, cache, output_checker):
             # unlinked testfiles check fails without kernel fix
             # "fuse: fix illegal access to inode with reused nodeid"
             # so opt-in for this test from kernel 5.14
-            if LooseVersion(platform.release()) >= '5.14':
+            if parse_kernel_version(platform.release()) >= version.parse('5.14'):
                 syscall_test_cmd.append('-u')
             subprocess.check_call(syscall_test_cmd)
     except:
@@ -261,14 +306,19 @@ def test_passthrough_hp(short_tmpdir, cache, output_checker):
     else:
         umount(mount_process, mnt_dir)
 
-        
+
 @pytest.mark.skipif(fuse_proto < (7,11),
                     reason='not supported by running kernel')
 def test_ioctl(tmpdir, output_checker):
     progname = pjoin(basename, 'example', 'ioctl')
     if not os.path.exists(progname):
         pytest.skip('%s not built' % os.path.basename(progname))
-    
+
+    # Check if binary is 32-bit
+    file_output = subprocess.check_output(['file', progname]).decode()
+    if 'ELF 32-bit' in file_output and platform.machine() == 'x86_64':
+        pytest.skip('ioctl test not supported for 32-bit binary on 64-bit system')
+
     mnt_dir = str(tmpdir)
     testfile = pjoin(mnt_dir, 'fioc')
     cmdline = base_cmdline + [progname, '-f', mnt_dir ]
@@ -287,6 +337,56 @@ def test_ioctl(tmpdir, output_checker):
         subprocess.check_call(cmdline + [ '3' ])
         with open(testfile, 'rb') as fh:
             assert fh.read()== b'foo'
+    except:
+        cleanup(mount_process, mnt_dir)
+        raise
+    else:
+        umount(mount_process, mnt_dir)
+
+@pytest.mark.skipif(fuse_proto < (7,11),
+                    reason='not supported by running kernel')
+def test_ioctl_ll(tmpdir, output_checker):
+    progname = pjoin(basename, 'example', 'ioctl_ll')
+    if not os.path.exists(progname):
+        pytest.skip('%s not built' % os.path.basename(progname))
+
+    # Check if binary is 32-bit
+    file_output = subprocess.check_output(['file', progname]).decode()
+    if 'ELF 32-bit' in file_output and platform.machine() == 'x86_64':
+        pytest.skip('ioctl_ll test not supported for 32-bit binary on 64-bit system')
+
+    mnt_dir = str(tmpdir)
+    testfile = pjoin(mnt_dir, 'fioc')
+    cmdline = base_cmdline + [progname, '-f', mnt_dir]
+    mount_process = subprocess.Popen(cmdline, stdout=output_checker.fd,
+                                     stderr=output_checker.fd)
+    try:
+        wait_for_mount(mount_process, mnt_dir)
+
+        client = pjoin(basename, 'example', 'ioctl_ll_client')
+
+        # Test restricted ioctls: get_size (should be 0 initially)
+        cmdline = base_cmdline + [client, 'get_size', testfile]
+        assert subprocess.check_output(cmdline) == b'0\n'
+
+        # Write some data via regular file I/O
+        with open(testfile, 'wb') as fh:
+            fh.write(b'foobar')
+
+        # Test restricted ioctls: get_size (should be 6 now)
+        cmdline = base_cmdline + [client, 'get_size', testfile]
+        assert subprocess.check_output(cmdline) == b'6\n'
+
+        # Test restricted ioctls: set_size
+        cmdline = base_cmdline + [client, 'set_size', testfile, '3']
+        subprocess.check_call(cmdline)
+
+        # Verify size changed
+        with open(testfile, 'rb') as fh:
+            assert fh.read() == b'foo'
+
+        # Note: Unrestricted ioctls (FIOC_READ, FIOC_WRITE) only work with CUSE,
+        # not regular FUSE mounts. They are tested via test_cuse instead.
     except:
         cleanup(mount_process, mnt_dir)
         raise
@@ -314,7 +414,7 @@ def test_null(tmpdir, output_checker):
     progname = pjoin(basename, 'example', 'null')
     if not os.path.exists(progname):
         pytest.skip('%s not built' % os.path.basename(progname))
-    
+
     mnt_file = str(tmpdir) + '/file'
     with open(mnt_file, 'w') as fh:
         fh.write('dummy')
@@ -336,10 +436,10 @@ def test_null(tmpdir, output_checker):
         umount(mount_process, mnt_file)
 
 
-##@pytest.mark.skip(reason='Failing test - inadequately documented, unable debug!')
 @pytest.mark.skipif(fuse_proto < (7,12),
                     reason='not supported by running kernel')
-@pytest.mark.parametrize("only_expire", ("invalidate_entries", "expire_entries"))
+@pytest.mark.parametrize("only_expire", ("invalidate_entries",
+                                         "expire_entries", "inc_epoch"))
 @pytest.mark.parametrize("notify", (True, False))
 def test_notify_inval_entry(tmpdir, only_expire, notify, output_checker):
     mnt_dir = str(tmpdir)
@@ -353,6 +453,10 @@ def test_notify_inval_entry(tmpdir, only_expire, notify, output_checker):
         cmdline.append('--only-expire')
         if "FUSE_CAP_EXPIRE_ONLY" not in fuse_caps:
             pytest.skip('only-expire not supported by running kernel')
+    elif only_expire == "inc_epoch":
+        cmdline.append('--inc-epoch')
+        if fuse_proto < (7,44):
+            pytest.skip('inc-epoch not supported by running kernel')
     mount_process = subprocess.Popen(cmdline, stdout=output_checker.fd,
                                      stderr=output_checker.fd)
     try:
@@ -372,6 +476,36 @@ def test_notify_inval_entry(tmpdir, only_expire, notify, output_checker):
             safe_sleep(5)
         with pytest.raises(FileNotFoundError):
             os.stat(fname)
+    except:
+        cleanup(mount_process, mnt_dir)
+        raise
+    else:
+        umount(mount_process, mnt_dir)
+
+@pytest.mark.skipif(fuse_proto < (7,45),
+                    reason='not supported by running kernel')
+@pytest.mark.parametrize("notify", (True, False))
+def test_notify_prune(tmpdir, notify, output_checker):
+    mnt_dir = str(tmpdir)
+    cmdline = base_cmdline + \
+              [ pjoin(basename, 'example', 'notify_prune'),
+                '-f', '--update-interval=1', mnt_dir ]
+    if not notify:
+        cmdline.append('--no-notify')
+    mount_process = subprocess.Popen(cmdline, stdout=output_checker.fd,
+                                     stderr=output_checker.fd)
+    try:
+        wait_for_mount(mount_process, mnt_dir)
+        fname = pjoin(mnt_dir, os.listdir(mnt_dir)[0])
+        with open(fname, 'r') as fh:
+            content = fh.read()
+
+        safe_sleep(2)
+        with open(fname, 'r') as fh:
+            if notify:
+                assert content != fh.read()
+            else:
+                assert content == fh.read()
     except:
         cleanup(mount_process, mnt_dir)
         raise
@@ -412,6 +546,14 @@ def test_dev_auto_unmount(short_tmpdir, output_checker, intended_user):
 @pytest.mark.skipif(os.getuid() != 0,
                     reason='needs to run as root')
 def test_cuse(output_checker):
+    progname = pjoin(basename, 'example', 'cuse')
+    if not os.path.exists(progname):
+        pytest.skip('%s not built' % os.path.basename(progname))
+
+    # Check if binary is 32-bit
+    file_output = subprocess.check_output(['file', progname]).decode()
+    if 'ELF 32-bit' in file_output and platform.machine() == 'x86_64':
+        pytest.skip('cuse test not supported for 32-bit binary on 64-bit system')
 
     # Valgrind warns about unknown ioctls, that's ok
     output_checker.register_output(r'^==([0-9]+).+unhandled ioctl.+\n'
@@ -496,7 +638,7 @@ def test_release_unlink_race(tmpdir, output_checker):
         safe_sleep(3)
 
         assert os.listdir(temp_dir_path) == []
-    
+
     except:
         temp_dir.cleanup()
         cleanup(fuse_process, fuse_mountpoint)
@@ -644,10 +786,10 @@ def tst_seek(src_dir, mnt_dir):
     with os_open(fullname, os.O_WRONLY) as fd:
         os.lseek(fd, 4, os.SEEK_SET)
         os.write(fd, b'com')
-        
+
     with open(fullname, 'rb') as fh:
         assert fh.read() == b'\0foocom\n'
-        
+
 def tst_open_unlink(mnt_dir):
     name = pjoin(mnt_dir, name_generator())
     data1 = b'foo'
@@ -707,7 +849,17 @@ def tst_link(mnt_dir):
 
     os.unlink(name1)
 
-def tst_readdir(src_dir, mnt_dir):
+def tst_inodes_nonzero(lines):
+    inode_nums = [int(line.split()[0]) for line in lines]
+    assert all(i != 0 for i in inode_nums), inode_nums
+
+def tst_inode(inode_check, actual, expected):
+    if inode_check == InodeCheck.EXACT:
+        assert expected == actual
+    elif inode_check == InodeCheck.NONZERO:
+        assert actual != 0
+
+def tst_readdir(src_dir, mnt_dir, inode_check=InodeCheck.EXACT):
     newdir = name_generator()
 
     src_newdir = pjoin(src_dir, newdir)
@@ -728,16 +880,18 @@ def tst_readdir(src_dir, mnt_dir):
     assert listdir_is == listdir_should
 
     inodes_is = readdir_inode(mnt_newdir)
-    inodes_should = readdir_inode(src_newdir)
-    assert inodes_is == inodes_should
+    if inode_check == InodeCheck.EXACT:
+        inodes_should = readdir_inode(src_newdir)
+        assert inodes_is == inodes_should
+    elif inode_check == InodeCheck.NONZERO:
+        tst_inodes_nonzero(inodes_is)
 
     os.unlink(file_)
     os.unlink(subfile)
     os.rmdir(subdir)
     os.rmdir(src_newdir)
 
-def tst_readdir_big(src_dir, mnt_dir):
-
+def tst_readdir_big(src_dir, mnt_dir, inode_check=InodeCheck.EXACT):
     # Add enough entries so that readdir needs to be called
     # multiple times.
     fnames = []
@@ -753,13 +907,17 @@ def tst_readdir_big(src_dir, mnt_dir):
     assert listdir_is == listdir_should
 
     inodes_is = readdir_inode(mnt_dir)
-    inodes_should = readdir_inode(src_dir)
-    assert inodes_is == inodes_should
+    if inode_check == InodeCheck.EXACT:
+        inodes_should = readdir_inode(src_dir)
+        assert inodes_is == inodes_should
+    elif inode_check == InodeCheck.NONZERO:
+        tst_inodes_nonzero(inodes_is)
 
     for fname in fnames:
+        # A comment just to get a diff
         stat_src = os.stat(pjoin(src_dir, fname))
         stat_mnt = os.stat(pjoin(mnt_dir, fname))
-        assert stat_src.st_ino == stat_mnt.st_ino
+        tst_inode(inode_check, stat_mnt.st_ino, stat_src.st_ino)
         assert stat_src.st_mtime == stat_mnt.st_mtime
         assert stat_src.st_ctime == stat_mnt.st_ctime
         assert stat_src.st_size == stat_mnt.st_size
@@ -835,28 +993,61 @@ def tst_utimens(mnt_dir, ns_tol=0):
         assert abs(fstat.st_atime_ns - atime_ns) <= ns_tol
         assert abs(fstat.st_mtime_ns - mtime_ns) <= ns_tol
 
-def tst_passthrough(src_dir, mnt_dir):
+def tst_passthrough(src_dir, mnt_dir, inode_check=InodeCheck.EXACT):
     name = name_generator()
     src_name = pjoin(src_dir, name)
-    mnt_name = pjoin(src_dir, name)
+    mnt_name = pjoin(mnt_dir, name)
+
+    print(f"\nDebug: Creating file {name}")
+    print(f"Debug: src_name={src_name}")
+    print(f"Debug: mnt_name={mnt_name}")
+
+    # First test: write to source directory
     assert name not in os.listdir(src_dir)
     assert name not in os.listdir(mnt_dir)
     with open(src_name, 'w') as fh:
         fh.write('Hello, world')
+
+    print(f"Debug: File written to src_name")
+
+    start_time = time.time()
+    while time.time() - start_time < 10:  # 10 second timeout
+        if name in os.listdir(mnt_dir):
+            break
+        print(f"Debug: Waiting for file to appear... ({time.time() - start_time:.1f}s)")
+        time.sleep(0.1)
+    else:
+        pytest.fail("File did not appear in mount directory within 10 seconds")
+
     assert name in os.listdir(src_dir)
     assert name in os.listdir(mnt_dir)
-    assert os.stat(src_name) == os.stat(mnt_name)
 
+    # Compare relevant stat attributes
+    src_stat = os.stat(src_name)
+    mnt_stat = os.stat(mnt_name)
+    assert src_stat.st_mode == mnt_stat.st_mode
+    tst_inode(inode_check, mnt_stat.st_ino, src_stat.st_ino)
+    assert src_stat.st_size == mnt_stat.st_size
+    assert src_stat.st_mtime == mnt_stat.st_mtime
+
+    # Second test: write to mount directory
     name = name_generator()
     src_name = pjoin(src_dir, name)
-    mnt_name = pjoin(src_dir, name)
+    mnt_name = pjoin(mnt_dir, name)
     assert name not in os.listdir(src_dir)
     assert name not in os.listdir(mnt_dir)
     with open(mnt_name, 'w') as fh:
         fh.write('Hello, world')
     assert name in os.listdir(src_dir)
     assert name in os.listdir(mnt_dir)
-    assert os.stat(src_name) == os.stat(mnt_name)
+
+    # Compare relevant stat attributes
+    src_stat = os.stat(src_name)
+    mnt_stat = os.stat(mnt_name)
+    assert src_stat.st_mode == mnt_stat.st_mode
+    tst_inode(inode_check, mnt_stat.st_ino, src_stat.st_ino)
+    assert src_stat.st_size == mnt_stat.st_size
+    assert abs(src_stat.st_mtime - mnt_stat.st_mtime) < 0.01
 
 
 def tst_xattr(path):
