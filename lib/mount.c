@@ -5,7 +5,7 @@
   Architecture specific file system mounting (Linux).
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB.
+  See the file LGPL2.txt.
 */
 
 /* For environ */
@@ -50,6 +50,8 @@
 
 #define FUSERMOUNT_PROG		"fusermount3"
 #define FUSE_COMMFD_ENV		"_FUSE_COMMFD"
+#define FUSE_COMMFD2_ENV	"_FUSE_COMMFD2"
+#define FUSE_KERN_DEVICE_ENV	"FUSE_KERN_DEVICE"
 
 #ifndef MS_DIRSYNC
 #define MS_DIRSYNC 128
@@ -145,16 +147,15 @@ static int fusermount_posix_spawn(posix_spawn_file_actions_t *action,
 	}
 
 	if (status != 0) {
-		fuse_log(FUSE_LOG_ERR,
-			 "On calling fusermount posix_spawn failed: %s\n",
-			 strerror(status));
+		fuse_log(FUSE_LOG_ERR, "Failed to call '%s': %s\n",
+			 FUSERMOUNT_PROG, strerror(status));
 		return -status;
 	}
 
 	if (out_pid)
 		*out_pid = pid;
 	else
-		waitpid(pid, NULL, 0);
+		waitpid(pid, NULL, 0); /* FIXME: check exit code and return error if any */
 
 	return 0;
 }
@@ -342,8 +343,8 @@ void fuse_kern_unmount(const char *mountpoint, int fd)
 				"--", mountpoint, NULL };
 	int status = fusermount_posix_spawn(NULL, argv, NULL);
 	if(status != 0) {
-		fuse_log(FUSE_LOG_ERR, "Spawaning %s to unumount failed",
-			 FUSERMOUNT_PROG);
+		fuse_log(FUSE_LOG_ERR, "Spawning %s to unmount failed: %s",
+			 FUSERMOUNT_PROG, strerror(-status));
 		return;
 	}
 }
@@ -361,7 +362,7 @@ static int setup_auto_unmount(const char *mountpoint, int quiet)
 
 	res = socketpair(PF_UNIX, SOCK_STREAM, 0, fds);
 	if(res == -1) {
-		fuse_log(FUSE_LOG_ERR, "Setting up auto-unmountsocketpair() failed",
+		fuse_log(FUSE_LOG_ERR, "Setting up auto-unmount socketpair() failed: %s\n",
 			 strerror(errno));
 		return -1;
 	}
@@ -369,6 +370,14 @@ static int setup_auto_unmount(const char *mountpoint, int quiet)
 	char arg_fd_entry[30];
 	snprintf(arg_fd_entry, sizeof(arg_fd_entry), "%i", fds[0]);
 	setenv(FUSE_COMMFD_ENV, arg_fd_entry, 1);
+	/*
+	 * This helps to identify the FD hold by parent process.
+	 * In auto-unmount case, parent process can close this FD explicitly to do unmount.
+	 * The FD[1] can be got via getenv(FUSE_COMMFD2_ENV).
+	 * One potential use case is to satisfy FD-Leak checks.
+	 */
+	snprintf(arg_fd_entry, sizeof(arg_fd_entry), "%i", fds[1]);
+	setenv(FUSE_COMMFD2_ENV, arg_fd_entry, 1);
 
 	char const *const argv[] = {
 		FUSERMOUNT_PROG,
@@ -383,8 +392,8 @@ static int setup_auto_unmount(const char *mountpoint, int quiet)
 	posix_spawn_file_actions_init(&action);
 
 	if (quiet) {
-		posix_spawn_file_actions_addclose(&action, 1);
-		posix_spawn_file_actions_addclose(&action, 2);
+		posix_spawn_file_actions_addopen(&action, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+		posix_spawn_file_actions_addopen(&action, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
 	}
 	posix_spawn_file_actions_addclose(&action, fds[1]);
 
@@ -399,7 +408,8 @@ static int setup_auto_unmount(const char *mountpoint, int quiet)
 	if(status != 0) {
 		close(fds[0]);
 		close(fds[1]);
-		fuse_log(FUSE_LOG_ERR, "fuse: Setting up auto-unmount failed");
+		fuse_log(FUSE_LOG_ERR, "fuse: Setting up auto-unmount failed (spawn): %s",
+			     strerror(-status));
 		return -1;
 	}
 	// passed to child now, so can close here.
@@ -433,6 +443,14 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 	char arg_fd_entry[30];
 	snprintf(arg_fd_entry, sizeof(arg_fd_entry), "%i", fds[0]);
 	setenv(FUSE_COMMFD_ENV, arg_fd_entry, 1);
+	/*
+	 * This helps to identify the FD hold by parent process.
+	 * In auto-unmount case, parent process can close this FD explicitly to do unmount.
+	 * The FD[1] can be got via getenv(FUSE_COMMFD2_ENV).
+	 * One potential use case is to satisfy FD-Leak checks.
+	 */
+	snprintf(arg_fd_entry, sizeof(arg_fd_entry), "%i", fds[1]);
+	setenv(FUSE_COMMFD2_ENV, arg_fd_entry, 1);
 
 	char const *const argv[] = {
 		FUSERMOUNT_PROG,
@@ -447,8 +465,8 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 	posix_spawn_file_actions_init(&action);
 
 	if (quiet) {
-		posix_spawn_file_actions_addclose(&action, 1);
-		posix_spawn_file_actions_addclose(&action, 2);
+		posix_spawn_file_actions_addopen(&action, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+		posix_spawn_file_actions_addopen(&action, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
 	}
 	posix_spawn_file_actions_addclose(&action, fds[1]);
 
@@ -459,8 +477,8 @@ static int fuse_mount_fusermount(const char *mountpoint, struct mount_opts *mo,
 	if(status != 0) {
 		close(fds[0]);
 		close(fds[1]);
-		fuse_log(FUSE_LOG_ERR, "posix_spawnp() for %s failed",
-			 FUSERMOUNT_PROG, strerror(errno));
+		fuse_log(FUSE_LOG_ERR, "posix_spawn(p)() for %s failed: %s",
+			 FUSERMOUNT_PROG, strerror(-status));
 		return -1;
 	}
 
@@ -490,7 +508,7 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 			  const char *mnt_opts)
 {
 	char tmp[128];
-	const char *devname = "/dev/fuse";
+	const char *devname = getenv(FUSE_KERN_DEVICE_ENV) ?: "/dev/fuse";
 	char *source = NULL;
 	char *type = NULL;
 	struct stat stbuf;
@@ -512,7 +530,9 @@ static int fuse_mount_sys(const char *mnt, struct mount_opts *mo,
 	fd = open(devname, O_RDWR | O_CLOEXEC);
 	if (fd == -1) {
 		if (errno == ENODEV || errno == ENOENT)
-			fuse_log(FUSE_LOG_ERR, "fuse: device not found, try 'modprobe fuse' first\n");
+			fuse_log(FUSE_LOG_ERR,
+				"fuse: device %s not found. Kernel module not loaded?\n",
+				devname);
 		else
 			fuse_log(FUSE_LOG_ERR, "fuse: failed to open %s: %s\n",
 				devname, strerror(errno));

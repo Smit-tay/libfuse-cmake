@@ -4,18 +4,25 @@
   Copyright (C) 2008       Tejun Heo <teheo@suse.de>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 /** @file
  * @tableofcontents
  *
- * Header file to share definitions between the ioctl.c example file
- * system and the ioctl_client.c test program.
+ * Header file to share definitions between the ioctl example file
+ * systems (ioctl.c, ioctl_ll.c, cuse.c) and their test programs
+ * (ioctl_client.c, ioctl_ll_client.c, cuse_client.c).
+ *
+ * Restricted ioctls (FIOC_GET_SIZE, FIOC_SET_SIZE):
+ *   Use _IOR/_IOW encoding - kernel handles data transfer automatically.
+ *
+ * Unrestricted ioctls (FIOC_READ, FIOC_WRITE):
+ *   Use _IO encoding - require fuse_reply_ioctl_retry() in low-level API.
+ *   Only work with CUSE (fuse kernel restriction).
  *
  * \include ioctl.h
  */
-
 
 #include <sys/types.h>
 #include <sys/uio.h>

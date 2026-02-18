@@ -2,7 +2,7 @@
 
 set -e
 
-TEST_CMD="pytest -v --maxfail=1 --log-level=DEBUG --log-cli-level=DEBUG test/"
+TEST_CMD="pytest -v --maxfail=1 --log-level=INFO --log-cli-level=INFO test/"
 SAN="-Db_sanitize=address,undefined"
 
 # not default
@@ -81,7 +81,7 @@ sanitized_build()
 
     meson setup -Dprefix=${PREFIX_DIR} -D werror=true\
            "${SOURCE_DIR}" \
-           || (ct meson-logs/meson-log.txt; false)
+           || (cat meson-logs/meson-log.txt; false)
     meson configure $SAN
 
     # b_lundef=false is required to work around clang
@@ -118,6 +118,30 @@ sanitized_build()
     sudo rm -fr ${PREFIX_DIR}
 )
 
+# Sanitized with io-uring
+export CC=clang
+export CXX=clang++
+export FUSE_URING_ENABLE=1
+sanitized_build
+unset FUSE_URING_ENABLE
+
+# 32-bit sanitized build
+export CC=clang
+export CXX=clang++
+export CFLAGS="-m32"
+export CXXFLAGS="-m32"
+export LDFLAGS="-m32"
+export PKG_CONFIG_PATH="/usr/lib/i386-linux-gnu/pkgconfig"
+TEST_WITH_VALGRIND=false
+sanitized_build
+unset CFLAGS
+unset CXXFLAGS
+unset LDFLAGS
+unset PKG_CONFIG_PATH
+unset TEST_WITH_VALGRIND
+unset CC
+unset CXX
+
 # Sanitized build
 export CC=clang
 export CXX=clang++
@@ -129,6 +153,12 @@ export CC=clang
 export CXX=clang++
 sanitized_build "-Ddisable-libc-symbol-version=true"
 
+# Sanitized build without fuse-io-uring
+export CC=clang
+export CXX=clang++
+sanitized_build "-Denable-io-uring=false"
+
+# Build without any sanitizer
 non_sanitized_build
 
 # Documentation.

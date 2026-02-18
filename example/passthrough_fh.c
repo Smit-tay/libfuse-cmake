@@ -4,7 +4,7 @@
   Copyright (C) 2011       Sebastian Pipping <sebastian@pipping.org>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 /** @file
@@ -27,7 +27,7 @@
     #undef FUSE_USE_VERSION
 #endif
 
-#define FUSE_USE_VERSION 31
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #ifdef HAVE_CONFIG_H
 #include "fuse_config.h"
@@ -56,6 +56,8 @@
 #include <sys/xattr.h>
 #endif
 #include <sys/file.h> /* flock(2) */
+
+#include "passthrough_helpers.h"
 
 static void *xmp_init(struct fuse_conn_info *conn,
 		      struct fuse_config *cfg)
@@ -524,18 +526,13 @@ static int xmp_fsync(const char *path, int isdatasync,
 	return 0;
 }
 
-#ifdef HAVE_POSIX_FALLOCATE
 static int xmp_fallocate(const char *path, int mode,
 			off_t offset, off_t length, struct fuse_file_info *fi)
 {
 	(void) path;
 
-	if (mode)
-		return -EOPNOTSUPP;
-
-	return -posix_fallocate(fi->fh, offset, length);
+	return do_fallocate(fi->fh, mode, offset, length);
 }
-#endif
 
 #ifdef HAVE_SETXATTR
 /* xattr operations are optional and can safely be left unimplemented */
@@ -629,6 +626,24 @@ static off_t xmp_lseek(const char *path, off_t off, int whence, struct fuse_file
 	return res;
 }
 
+#ifdef HAVE_STATX
+static int xmp_statx(const char *path, int flags, int mask, struct statx *stxbuf,
+		     struct fuse_file_info *fi)
+{
+	int fd = -1;
+	int res;
+
+	if (fi)
+		fd = fi->fh;
+
+	res = statx(fd, path, flags | AT_SYMLINK_NOFOLLOW, mask, stxbuf);
+	if (res == -1)
+		return -errno;
+
+	return 0;
+}
+#endif
+
 static const struct fuse_operations xmp_oper = {
 	.init           = xmp_init,
 	.getattr	= xmp_getattr,
@@ -660,9 +675,7 @@ static const struct fuse_operations xmp_oper = {
 	.flush		= xmp_flush,
 	.release	= xmp_release,
 	.fsync		= xmp_fsync,
-#ifdef HAVE_POSIX_FALLOCATE
 	.fallocate	= xmp_fallocate,
-#endif
 #ifdef HAVE_SETXATTR
 	.setxattr	= xmp_setxattr,
 	.getxattr	= xmp_getxattr,
@@ -677,6 +690,9 @@ static const struct fuse_operations xmp_oper = {
 	.copy_file_range = xmp_copy_file_range,
 #endif
 	.lseek		= xmp_lseek,
+#ifdef HAVE_STATX
+	.statx		= xmp_statx,
+#endif
 };
 
 int main(int argc, char *argv[])

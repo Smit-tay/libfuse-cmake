@@ -1,6 +1,6 @@
 # Compile helper programs
 td = []
-foreach prog: [ 'test_write_cache', 'test_setattr' ]
+foreach prog: [ 'test_write_cache', 'test_setattr', 'hello' ]
     td += executable(prog, prog + '.c',
                      include_directories: include_dirs,
                      link_with: [ libfuse ],
@@ -14,6 +14,18 @@ td += executable('readdir_inode', 'readdir_inode.c',
                  include_directories: include_dirs,
                  install: false)
 td += executable('release_unlink_race', 'release_unlink_race.c',
+                 dependencies: [ libfuse_dep ],
+                 install: false)
+td += executable('test_want_conversion', 'test_want_conversion.c',
+                 dependencies: [ libfuse_dep ],
+                 install: false)
+td += executable('test_signals', 'test_signals.c',
+                 dependencies: [ libfuse_dep, thread_dep ],
+                 install: false)
+td += executable('test_teardown_watchdog', 'test_teardown_watchdog.c',
+                 dependencies: [ libfuse_dep, thread_dep ],
+                 install: false)
+td += executable('test_abi', 'test_abi.c',
                  dependencies: [ libfuse_dep ],
                  install: false)
 

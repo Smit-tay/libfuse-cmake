@@ -189,11 +189,10 @@ FUSE_3.12 {
 
 FUSE_3.17 {
 	global:
-		_fuse_session_new_317;
-		_fuse_new;
+		fuse_main_real_versioned;
+		fuse_session_new_versioned;
 		_fuse_new_30;
-		_fuse_new_317;
-		fuse_main_real_317;
+		_fuse_new_31;
 		fuse_passthrough_open;
 		fuse_passthrough_close;
 		fuse_session_custom_io_30;
@@ -202,6 +201,33 @@ FUSE_3.17 {
 		fuse_log_enable_syslog;
 		fuse_log_close_syslog;
 } FUSE_3.12;
+
+FUSE_3.17.3 {
+	global:
+		fuse_set_feature_flag;
+		fuse_unset_feature_flag;
+		fuse_get_feature_flag;
+
+		# Not part of public API, for internal testing only
+		fuse_convert_to_conn_want_ext;
+} FUSE_3.17;
+
+FUSE_3.18 {
+	global:
+		fuse_req_is_uring;
+		fuse_req_get_payload;
+		fuse_lowlevel_notify_increment_epoch;
+
+		fuse_reply_statx;
+		fuse_fs_statx;
+} FUSE_3.17;
+
+FUSE_3.19 {
+	global:
+		fuse_session_start_teardown_watchdog;
+		fuse_session_stop_teardown_watchdog;
+		fuse_lowlevel_notify_prune;
+} FUSE_3.18;
 
 # Local Variables:
 # indent-tabs-mode: t

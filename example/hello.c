@@ -3,7 +3,7 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 /** @file
@@ -61,6 +61,11 @@ static void *hello_init(struct fuse_conn_info *conn,
 {
 	(void) conn;
 	cfg->kernel_cache = 1;
+
+	/* Test setting flags the old way */
+	fuse_set_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+	fuse_unset_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+
 	return NULL;
 }
 
