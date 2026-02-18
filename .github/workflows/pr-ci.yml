@@ -38,5 +38,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - uses: threeal/cmake-action@v2.1.0
       - run: test/ci-cmake_build.sh
 
