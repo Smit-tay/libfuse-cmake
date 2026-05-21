@@ -2,10 +2,15 @@ name: CodeChecker Analysis
 
 on:
   workflow_dispatch:
-  push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+  # Auto-runs disabled: this workflow was inherited from upstream libfuse and
+  # is meson-specific (the codechecker.sh script calls `meson setup` and
+  # `meson compile`). This fork builds with CMake, so the analyzer jobs fail
+  # every push with shell syntax errors inside codechecker.sh. Kept around
+  # under workflow_dispatch in case it gets rewritten for CMake later.
+  # push:
+  #   branches: ["master"]
+  # pull_request:
+  #   branches: ["master"]
 
 jobs:
   gcc-codechecker:

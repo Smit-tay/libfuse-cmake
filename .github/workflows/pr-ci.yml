@@ -32,5 +32,5 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           ./.github/workflows/install-ubuntu-dependencies.sh --full
-      - run: test/ci-build.sh
+      - run: test/ci-cmake_build.sh
 

@@ -1,0 +1,15 @@
+#pragma once
+
+/*
+ * Public configuration for libfuse, installed alongside the headers.
+ * Mirrors meson's public_cfg: only version macros and ABI-relevant flags.
+ * Anything that would collide with an application's own feature detection
+ * (HAVE_FORK, HAVE_OPENAT, etc.) belongs in the private fuse_config.h.
+ */
+
+#define FUSE_MAJOR_VERSION  @FUSE_MAJOR_VERSION@
+#define FUSE_MINOR_VERSION  @FUSE_MINOR_VERSION@
+#define FUSE_HOTFIX_VERSION @FUSE_HOTFIX_VERSION@
+#define FUSE_RC_VERSION     "@FUSE_RC_VERSION@"
+
+#cmakedefine LIBFUSE_BUILT_WITH_VERSIONED_SYMBOLS

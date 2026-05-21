@@ -1,0 +1,50 @@
+#pragma once
+
+/*
+ * Private build-time configuration for libfuse.
+ * Generated from fuse_config.h.in by CMake (mirrors meson's private_cfg).
+ * NOT installed - these symbols would otherwise leak into applications
+ * linking libfuse and collide with their own feature checks.
+ */
+
+#define PACKAGE_VERSION "@PROJECT_VERSION_FULL@"
+
+/* Header presence */
+#cmakedefine HAVE_SYS_XATTR_H
+#cmakedefine HAVE_LINUX_LIMITS_H
+
+/* Function / syscall presence */
+#cmakedefine HAVE_FORK
+#cmakedefine HAVE_FSTATAT
+#cmakedefine HAVE_OPENAT
+#cmakedefine HAVE_READLINKAT
+#cmakedefine HAVE_PIPE2
+#cmakedefine HAVE_SPLICE
+#cmakedefine HAVE_VMSPLICE
+#cmakedefine HAVE_POSIX_FALLOCATE
+#cmakedefine HAVE_FDATASYNC
+#cmakedefine HAVE_UTIMENSAT
+#cmakedefine HAVE_COPY_FILE_RANGE
+#cmakedefine HAVE_FALLOCATE
+#cmakedefine HAVE_FSPACECTL
+#cmakedefine HAVE_SETXATTR
+#cmakedefine HAVE_ICONV
+#cmakedefine HAVE_BACKTRACE
+#cmakedefine HAVE_STATX
+
+/* Compile-tested features (need more than symbol presence) */
+#cmakedefine HAVE_PTHREAD_SETNAME_NP
+#cmakedefine HAVE_CLOSE_RANGE
+#cmakedefine HAVE_LISTMOUNT
+#cmakedefine HAVE_NEW_MOUNT_API
+#cmakedefine HAVE_URING
+
+/* struct stat members - timestamp representation differs by platform */
+#cmakedefine HAVE_STRUCT_STAT_ST_ATIM
+#cmakedefine HAVE_STRUCT_STAT_ST_ATIMESPEC
+
+/* musl libc workaround */
+#cmakedefine GETMNTENT_NEEDS_UNESCAPING
+
+/* Build-time options */
+#cmakedefine USDT_ENABLED
