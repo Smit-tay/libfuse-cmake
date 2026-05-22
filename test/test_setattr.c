@@ -122,10 +122,10 @@ static void tfs_setattr (fuse_req_t req, fuse_ino_t ino, struct stat *attr,
 }
 
 static struct fuse_lowlevel_ops tfs_oper = {
-    .lookup	= tfs_lookup,
-    .getattr	= tfs_getattr,
-    .open	= tfs_open,
-    .setattr	= tfs_setattr,
+    .lookup = tfs_lookup,
+    .getattr    = tfs_getattr,
+    .open   = tfs_open,
+    .setattr    = tfs_setattr,
 };
 
 static void* run_fs(void *data) {
@@ -136,7 +136,7 @@ static void* run_fs(void *data) {
 
 static void test_fs(const char *mountpoint)
 {
-    char fname[PATH_MAX];
+    char fname[PATH_MAX] = {0};
     int fd;
 
     assert(snprintf(fname, PATH_MAX, "%s/" FILE_NAME,
@@ -154,7 +154,7 @@ static void test_fs(const char *mountpoint)
 int main(int argc, char *argv[]) {
     struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
     struct fuse_session *se;
-    struct fuse_cmdline_opts fuse_opts;
+    struct fuse_cmdline_opts fuse_opts = {0};
     pthread_t fs_thread;
 
     assert(fuse_parse_cmdline(&args, &fuse_opts) == 0);
