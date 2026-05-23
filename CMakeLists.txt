@@ -50,10 +50,31 @@ endif()
 #
 # we do our best to follow suite:
 
-if (NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
-  if (NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "" FORCE)
-  endif()
+# libfuse uses assert() as load-bearing flow control. Patterns like
+# `assert(fuse_session_new(...) != NULL)` rely on the function call AND
+# the check happening. With -DNDEBUG, the entire expression is elided -
+# the function never runs and the library breaks in mysterious ways.
+#
+# We default to Debug build (no -DNDEBUG) for that reason. If the user
+# explicitly picks a build type that defines NDEBUG, we warn but let them
+# proceed - they may have a reason, and they can deal with the fallout.
+if(NOT CMAKE_BUILD_TYPE AND NOT EXISTS ${CMAKE_BINARY_DIR}/CMakeCache.txt)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
+        "Build type (Debug recommended - libfuse asserts are load-bearing)"
+        FORCE)
+endif()
+
+# Detect if NDEBUG will be defined for this build (any source.) The previous
+# `if(DEFINED NDEBUG)` check was broken - DEFINED tests CMake variables, not
+# preprocessor defines. We check the actual flags that will reach the
+# compiler.
+set(_ndebug_check "${CMAKE_C_FLAGS} ${CMAKE_C_FLAGS_${CMAKE_BUILD_TYPE}}")
+if(_ndebug_check MATCHES "(^| )-DNDEBUG( |$)")
+    message(WARNING
+        "NDEBUG is defined for this build (build type: ${CMAKE_BUILD_TYPE}). "
+        "libfuse uses assert() as load-bearing flow control - this WILL "
+        "produce a non-functional library. Use -DCMAKE_BUILD_TYPE=Debug, "
+        "or expect mysterious runtime failures.")
 endif()
 
 # meson uses c_std=gnu11 (GNU extensions enabled). CMake's CMAKE_C_EXTENSIONS
