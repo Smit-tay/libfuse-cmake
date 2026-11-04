@@ -29,7 +29,26 @@ set(FUSE_HOTFIX_VERSION ${PROJECT_VERSION_PATCH})
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(FuseConfigData)
+
+# meson's default libdir (default_libdir() in mesonbuild/utils/universal.py)
+# is lib/<multiarch> on Debian-like systems for every prefix; GNUInstallDirs
+# uses that only for prefix /usr. A libdir given on the command line wins.
+if(NOT DEFINED CACHE{CMAKE_INSTALL_LIBDIR} AND EXISTS /etc/debian_version)
+    execute_process(COMMAND dpkg-architecture -qDEB_HOST_MULTIARCH
+                    OUTPUT_VARIABLE _fuse_multiarch
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    RESULT_VARIABLE _fuse_multiarch_rc
+                    ERROR_QUIET)
+    if(_fuse_multiarch_rc EQUAL 0 AND _fuse_multiarch)
+        set(CMAKE_INSTALL_LIBDIR "lib/${_fuse_multiarch}"
+            CACHE PATH "Object code libraries (lib)")
+    endif()
+endif()
 include(GNUInstallDirs)
+
+# meson installs shared libraries with mode 0755 everywhere; CMake's Linux
+# platform default drops the execute bits on Debian.
+set(CMAKE_INSTALL_SO_NO_EXE OFF)
 
 # meson's host_machine.system() is lower case: 'linux', 'freebsd', 'netbsd',
 # 'dragonfly', 'darwin', 'cygwin', 'windows'. Normalise CMAKE_SYSTEM_NAME the
