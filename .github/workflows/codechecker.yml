@@ -10,7 +10,10 @@ on:
 jobs:
   gcc-codechecker:
     name: GCC Analysis with CodeChecker
-    runs-on: ubuntu-latest
+    # Fork: pinned to the image upstream last passed on. Ubuntu 26.04's
+    # gcc 15 and cppcheck 2.19 add checkers upstream's codechecker.sh is not
+    # tuned for yet; return to ubuntu-latest once upstream has retuned it.
+    runs-on: ubuntu-24.04
     permissions:
       security-events: write
       contents: read
@@ -88,7 +91,10 @@ jobs:
 
   cppcheck-codechecker:
     name: cppcheck Analysis with CodeChecker
-    runs-on: ubuntu-latest
+    # Fork: pinned to the image upstream last passed on. Ubuntu 26.04's
+    # gcc 15 and cppcheck 2.19 add checkers upstream's codechecker.sh is not
+    # tuned for yet; return to ubuntu-latest once upstream has retuned it.
+    runs-on: ubuntu-24.04
     permissions:
       security-events: write
       contents: read

@@ -17,7 +17,10 @@ CI: `.github/workflows/cmake.yml` is the fork's only addition to upstream's
 workflows. It builds with CMake (gcc, clang, gcc `-m32`; unprivileged and as
 root), fails on any warning, runs the test suite, and runs
 `check-meson-parity.py --tests-as-root` for gcc and clang. Every other
-workflow is upstream's, unchanged, and builds with meson.
+workflow is upstream's and builds with meson. The one change to them:
+`codechecker.yml` runs its gcc and cppcheck jobs on `ubuntu-24.04`, the image
+upstream last passed on, until upstream retunes `codechecker.sh` for Ubuntu
+26.04's newer analyzers; check on each sync whether the pin can go.
 
 Each `CMakeLists.txt` follows its `meson.build` section by section, with the
 meson construct it mirrors named in a comment, so an upstream change to one
