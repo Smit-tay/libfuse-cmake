@@ -12,7 +12,6 @@ pipeline {
                       -DOPTION_BUILD_UTILS=ON \
                       -DOPTION_BUILD_EXAMPLES=ON \
                       -DCMAKE_INSTALL_PREFIX=./install \
-                      -DCMAKE_BUILD_TYPE=Debug \
                       ..
                '''
             }

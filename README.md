@@ -81,40 +81,53 @@ Visual Studio, Eclipse, CodeBlocks, Ninja, or plain old Unix make.
 You are free to use the Unix make, Ninja, or any other CMake supported make
 system - see, CMake is better than meson !
 
+### Building with CMake
+
 Out of source builds are *highly* recommended.  Simply create a (temporary)
 build directory and run CMake:
 
     $ mkdir build; cd build
     $ cmake ..
 
-Normally, the default build options will work fine. However, to build examples,
-tests, and other recommended utilities, you will probably want to do this:
-(this also explicitly uses Unix Makefiles - the cmake default)
+The defaults match upstream's meson build: utilities, examples and tests are
+all built, and the build type is `RelWithDebInfo` (`-O2 -g`, meson's
+`debugoptimized`). As in meson, `NDEBUG` is never defined unless you ask for
+it - the tests and examples rely on `assert()` running.
 
-```
+Options are set with `-D` on the command line (or with `ccmake`/`cmake-gui`).
+Each one mirrors a meson option:
 
-   $ cmake -G "Unix Makefiles" \
-                -DOPTION_BUILD_UTILS=ON \
-                -DOPTION_BUILD_EXAMPLES=ON \
-                -DCMAKE_INSTALL_PREFIX=/home/<USER>/FUSE/install \
-                -DCMAKE_BUILD_TYPE=Debug ..
-                
-```
+| CMake option | meson option | Default |
+|---|---|---|
+| `OPTION_BUILD_UTILS` | `utils` | `ON` |
+| `OPTION_BUILD_EXAMPLES` | `examples` | `ON` |
+| `OPTION_BUILD_TESTS` | `tests` | `ON` |
+| `OPTION_ENABLE_IO_URING` | `enable-io-uring` | `ON` (used if liburing is found) |
+| `OPTION_ENABLE_CUSTOM_IO` | `enable-custom-io` | `OFF` (see `doc/README.custom-io`) |
+| `OPTION_ENABLE_USDT` | `enable-usdt` | `OFF` |
+| `OPTION_DISABLE_LIBC_SYMBOL_VERSION` | `disable-libc-symbol-version` | `OFF` |
+| `OPTION_SYNC_INIT` | `sync-init` | `auto` (`auto`, `always`, `never`) |
+| `OPTION_SERVICE_SOCKET_DIR` | `service-socket-dir` | empty = `/run/fuse` |
+| `OPTION_SERVICE_SOCKET_PERMS` | `service-socket-perms` | empty = `0220` |
+| `OPTION_SYSTEMD_SYSTEM_UNIT_DIR` | `systemd-system-unit-dir` | empty = ask pkg-config |
+| `OPTION_UDEVRULESDIR` | `udevrulesdir` | empty = ask pkg-config |
+| `OPTION_INITSCRIPTDIR` | `initscriptdir` | `/etc/init.d/` (empty = don't install) |
+| `OPTION_USEROOT` | `useroot` | `ON` (make fusermount3 setuid root on install) |
+| `OPTION_NDEBUG` | `b_ndebug` | `OFF` |
+
+For example, to install into your home directory without the setuid step:
+
+    $ cmake -DCMAKE_INSTALL_PREFIX=$HOME/FUSE/install -DOPTION_USEROOT=OFF ..
 
 To build, test and install, you then use make (or other supported build systems):
-
-  The equivalent for Meson build is as follows:
-  
-    $ meson configure # list options
-    $ meson configure -D disable-mtab=true # set an optionq
-
-    $ # ensure all meson options are applied to the final build system
-    $ meson setup --reconfigure ../
-
 
     $ make
     $ sudo ../test/run-tests.py --build-dir .
     $ sudo make install
+
+`make check` builds everything and runs the same suite through `ctest`.
+
+### Running the tests
 
 Running the tests requires bash, Python 3 and (to resolve core dumps)
 gdb. Instead of running the tests as root, the majority of tests can
@@ -129,6 +142,22 @@ to add one and where to look when one fails.
 
 NOTE: Some tests are designed to "drop privileges" and so will be skipped if the
 user is not root.
+
+### Building with meson
+
+The meson build files are kept, unchanged from upstream, so upstream's own
+instructions also work:
+
+    $ mkdir build; cd build
+    $ meson setup ..
+    $ meson configure            # list options
+    $ ninja
+
+### Keeping this fork in sync with upstream
+
+See [cmake/README.md](cmake/README.md) for how upstream changes are merged and
+how `cmake/check-meson-parity.py` checks that the CMake build still produces
+what meson does.
 
 Security implications
 ---------------------
