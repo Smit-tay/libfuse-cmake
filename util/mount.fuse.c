@@ -6,6 +6,9 @@
   See the file GPL2.txt.
 */
 
+/* For environ */
+#define _GNU_SOURCE
+
 #include "fuse_config.h"
 
 #include <stdio.h>
@@ -13,10 +16,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <fcntl.h>
 #include <pwd.h>
 #include <sys/wait.h>
+#ifdef HAVE_SERVICEMOUNT
+#include <spawn.h>
+#endif
 
 #ifdef linux
 #include <sys/prctl.h>
@@ -49,6 +56,7 @@
 #endif
 
 #include "fuse.h"
+#include "mount_service.h"
 
 static char *progname;
 
@@ -104,13 +112,15 @@ static void add_arg(char **cmdp, const char *opt)
 static char *add_option(const char *opt, char *options)
 {
 	int oldlen = options ? strlen(options) : 0;
+	size_t newsize = oldlen + 1 + strlen(opt) + 1;
 
-	options = xrealloc(options, oldlen + 1 + strlen(opt) + 1);
-	if (!oldlen)
-		strcpy(options, opt);
-	else {
-		strcat(options, ",");
-		strcat(options, opt);
+	options = xrealloc(options, newsize);
+	if (!oldlen) {
+		strncpy(options, opt, newsize - 1);
+		options[newsize - 1] = '\0';
+	} else {
+		strncat(options, ",", newsize - strlen(options) - 1);
+		strncat(options, opt, newsize - strlen(options) - 1);
 	}
 	return options;
 }
@@ -231,6 +241,171 @@ static void drop_and_lock_capabilities(void)
 		exit(1);
 	}
 }
+
+/*
+ * Mirror the PATH lookup /bin/sh is about to do. Returns 0 if the binary is
+ * reachable and executable, otherwise a negative errno explaining why
+ * (-EACCES = permission denied, -ENOENT = not found). Must run after
+ * drop_and_lock_capabilities(): with no capabilities left and
+ * SECBIT_NO_SETUID_FIXUP set, access(X_OK) is a plain DAC check matching
+ * the upcoming execve, so this is deny-only -- it cannot grant access the
+ * exec would be refused, only report it earlier with a better message.
+ */
+/* access(X_OK), with errno mapped to a negative errno (-ENOENT = "not found"). */
+static int access_executable(const char *path)
+{
+	if (access(path, X_OK) == 0)
+		return 0;
+	return errno == EACCES ? -EACCES : -ENOENT;
+}
+
+static int check_binary_access(const char *name)
+{
+	const char *path_env, *seg;
+	char test_path[PATH_MAX];
+	int err = -ENOENT;
+
+	/* A name containing '/' is run verbatim by the shell, no PATH search. */
+	if (strchr(name, '/'))
+		return access_executable(name);
+
+	path_env = getenv("PATH");
+	if (!path_env)
+		return -ENOENT;
+
+	/* Walk PATH segment by segment without copying it (no strtok). */
+	for (seg = path_env; *seg; ) {
+		size_t dir_len = strcspn(seg, ":");
+
+		/* skip empty and oversized entries */
+		if (dir_len &&
+		    snprintf(test_path, sizeof(test_path), "%.*s/%s",
+			     (int)dir_len, seg, name) < (int)sizeof(test_path)) {
+			int ret = access_executable(test_path);
+			if (ret == 0)
+				return 0;
+			if (ret == -EACCES)
+				err = -EACCES;
+		}
+
+		seg += dir_len;
+		if (*seg == ':')
+			seg++;
+	}
+
+	return err;
+}
+#endif
+
+#ifdef HAVE_SERVICEMOUNT
+#define FUSERVICEMOUNT_PROG	"fuservicemount3"
+
+static int mount_service_child(char **argv)
+{
+	const char *full_path = FUSERVICEMOUNT_DIR "/" FUSERVICEMOUNT_PROG;
+	pid_t child_pid;
+	int child_status;
+	int ret;
+
+	/*
+	 * First try the install path, then a system install, just like we do
+	 * for fusermount.  See man 7 environ for the global environ pointer.
+	 */
+	ret = posix_spawn(&child_pid, full_path, NULL, NULL,
+			  (char *const *)argv, environ);
+	if (ret)
+		ret = posix_spawnp(&child_pid, FUSERVICEMOUNT_PROG, NULL, NULL,
+				   (char * const *)argv, environ);
+	if (ret) {
+		fprintf(stderr, "%s: could not start %s helper: %s\n",
+			argv[0], FUSERVICEMOUNT_PROG, strerror(ret));
+		return MOUNT_SERVICE_FALLBACK_NEEDED;
+	}
+
+	do {
+		ret = waitpid(child_pid, &child_status, 0);
+	} while (ret < 0 && errno == EINTR);
+	if (ret < 0) {
+		fprintf(stderr, "%s: could not wait for %s helper: %s\n",
+			argv[0], FUSERVICEMOUNT_PROG, strerror(errno));
+		return MOUNT_SERVICE_FALLBACK_NEEDED;
+	}
+
+	if (WIFEXITED(child_status))
+		return WEXITSTATUS(child_status);
+
+	/* terminated due to signal or coredump */
+	return EXIT_FAILURE;
+}
+
+static int try_service_main(const char *argv0, const char *fstype,
+			    const char *source, const char *mountpoint,
+			    const char *options)
+{
+	struct fuse_args args = FUSE_ARGS_INIT(0, NULL);
+	int ret;
+
+	if (!mount_service_present(fstype))
+		return MOUNT_SERVICE_FALLBACK_NEEDED;
+
+	/* This can be an empty string if "mount.fuse3 null# /tmp/a" */
+	if (source && source[0] == 0)
+		source = NULL;
+
+	ret = fuse_opt_add_arg(&args, argv0);
+	if (ret)
+		goto out;
+
+	if (source) {
+		ret = fuse_opt_add_arg(&args, source);
+		if (ret)
+			goto out;
+	}
+
+	ret = fuse_opt_add_arg(&args, mountpoint);
+	if (ret)
+		goto out;
+
+	ret = fuse_opt_add_arg(&args, "-t");
+	if (ret)
+		goto out;
+
+	ret = fuse_opt_add_arg(&args, fstype);
+	if (ret)
+		goto out;
+
+	if (options) {
+		ret = fuse_opt_add_arg(&args, "-o");
+		if (ret)
+			goto out;
+
+		ret = fuse_opt_add_arg(&args, options);
+		if (ret)
+			goto out;
+	}
+
+	/* If we're root, just do the mount directly. */
+	if (getuid() != 0)
+		ret = mount_service_child(args.argv);
+	else
+		ret = mount_service_main(args.argc, args.argv);
+
+out:
+	fuse_opt_free_args(&args);
+	return ret;
+}
+#else
+static int try_service_main(const char *argv0, const char *fstype,
+			    const char *source, const char *mountpoint,
+			    const char *options)
+{
+	(void)argv0;
+	(void)fstype;
+	(void)source;
+	(void)mountpoint;
+	(void)options;
+	return MOUNT_SERVICE_FALLBACK_NEEDED;
+}
 #endif
 
 int main(int argc, char *argv[])
@@ -250,6 +425,7 @@ int main(int argc, char *argv[])
 	int fuse_fd = 0;
 	int drop_privileges = 0;
 	char *dev_fd_mountpoint = NULL;
+	int ret;
 
 	progname = argv[0];
 	basename = strrchr(argv[0], '/');
@@ -274,15 +450,13 @@ int main(int argc, char *argv[])
 	}
 
 	source = argv[1];
-	if (!source[0])
+	if (source && !source[0])
 		source = NULL;
 
 	mountpoint = argv[2];
 
 	for (i = 3; i < argc; i++) {
-		if (strcmp(argv[i], "-v") == 0) {
-			continue;
-		} else if (strcmp(argv[i], "-t") == 0) {
+		if (strcmp(argv[i], "-t") == 0) {
 			i++;
 
 			if (i == argc) {
@@ -303,6 +477,30 @@ int main(int argc, char *argv[])
 					progname);
 				exit(1);
 			}
+		}
+	}
+
+	if (!type) {
+		if (source) {
+			dup_source = xstrdup(source);
+			type = dup_source;
+			source = strchr(type, '#');
+			if (source)
+				*source++ = '\0';
+			if (!type[0]) {
+				fprintf(stderr, "%s: empty filesystem type\n",
+					progname);
+				exit(1);
+			}
+		} else {
+			fprintf(stderr, "%s: empty source\n", progname);
+			exit(1);
+		}
+	}
+
+	for (i = 3; i < argc; i++) {
+		if (strcmp(argv[i], "-v") == 0) {
+			continue;
 		} else	if (strcmp(argv[i], "-o") == 0) {
 			char *opts;
 			const char *opt;
@@ -366,24 +564,6 @@ int main(int argc, char *argv[])
 	if (suid)
 		options = add_option("suid", options);
 
-	if (!type) {
-		if (source) {
-			dup_source = xstrdup(source);
-			type = dup_source;
-			source = strchr(type, '#');
-			if (source)
-				*source++ = '\0';
-			if (!type[0]) {
-				fprintf(stderr, "%s: empty filesystem type\n",
-					progname);
-				exit(1);
-			}
-		} else {
-			fprintf(stderr, "%s: empty source\n", progname);
-			exit(1);
-		}
-	}
-
 	if (setuid_name && setuid_name[0]) {
 #ifdef linux
 		if (drop_privileges) {
@@ -426,9 +606,31 @@ int main(int argc, char *argv[])
 
 #ifdef linux
 	if (drop_privileges) {
+		int err;
+
 		drop_and_lock_capabilities();
+		err = check_binary_access(type);
+		if (err) {
+			fprintf(stderr, "%s: cannot execute '%s' after dropping privileges (%s)\n",
+				progname, type,
+				err == -EACCES ? "permission denied" : "not found");
+			exit(1);
+		}
 	}
 #endif
+
+	/*
+	 * Now that we know the desired filesystem type, see if we can find
+	 * a socket service implementing that, if we haven't selected any weird
+	 * options that would prevent that.
+	 */
+	if (!pass_fuse_fd && !(setuid_name && setuid_name[0])) {
+		ret = try_service_main(argv[0], type, source, mountpoint,
+				       options);
+		if (ret != MOUNT_SERVICE_FALLBACK_NEEDED)
+			goto out;
+	}
+
 	add_arg(&command, type);
 	if (source)
 		add_arg(&command, source);
@@ -438,17 +640,18 @@ int main(int argc, char *argv[])
 		add_arg(&command, options);
 	}
 
+	execl("/bin/sh", "/bin/sh", "-c", command, NULL);
+	fprintf(stderr, "%s: failed to execute /bin/sh: %s\n", progname,
+		strerror(errno));
+	ret = 1;
+
+out:
+	if (pass_fuse_fd)
+		close(fuse_fd);
 	free(options);
 	free(dev_fd_mountpoint);
 	free(dup_source);
 	free(setuid_name);
-
-	execl("/bin/sh", "/bin/sh", "-c", command, NULL);
-	fprintf(stderr, "%s: failed to execute /bin/sh: %s\n", progname,
-		strerror(errno));
-	
-	if (pass_fuse_fd)
-		close(fuse_fd);
 	free(command);
-	return 1;
+	return ret;
 }

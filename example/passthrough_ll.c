@@ -31,9 +31,10 @@
  */
 
 #define _GNU_SOURCE
-#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 19)
 
 #include <fuse_lowlevel.h>
+#include <fuse_daemonize.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -167,6 +168,9 @@ static void lo_init(void *userdata,
 	struct lo_data *lo = (struct lo_data *)userdata;
 	bool has_flag;
 
+	/* Always replies inline on the io-uring worker thread */
+	fuse_set_conn_flag(conn, FUSE_CONN_FLAG_SINGLE_ISSUER);
+
 	if (lo->writeback) {
 		has_flag = fuse_set_feature_flag(conn, FUSE_CAP_WRITEBACK_CACHE);
 		if (lo->debug && has_flag)
@@ -181,7 +185,7 @@ static void lo_init(void *userdata,
 	}
 
 	/* Disable the receiving and processing of FUSE_INTERRUPT requests */
-	conn->no_interrupt = 1;
+	fuse_set_conn_flag(conn, FUSE_CONN_FLAG_NO_INTERRUPT);
 }
 
 static void lo_destroy(void *userdata)
@@ -691,7 +695,10 @@ static void lo_do_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 	p = buf;
 
 	if (offset != d->offset) {
-		seekdir(d->dp, offset);
+		if (offset == 0)
+			rewinddir(d->dp);
+		else
+			seekdir(d->dp, offset);
 		d->entry = NULL;
 		d->offset = offset;
 	}
@@ -1382,10 +1389,14 @@ int main(int argc, char *argv[])
 	if (fuse_set_signal_handlers(se) != 0)
 	    goto err_out2;
 
+	if (fuse_daemonize_early_start(opts.foreground ?
+				       FUSE_DAEMONIZE_NO_BACKGROUND : 0) != 0)
+		goto err_out3;
+
 	if (fuse_session_mount(se, opts.mountpoint) != 0)
 	    goto err_out3;
 
-	fuse_daemonize(opts.foreground);
+	fuse_daemonize_early_success();
 
 	/* Block until ctrl+c or fusermount -u */
 	if (opts.singlethread)

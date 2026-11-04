@@ -12,6 +12,7 @@
 #include "fuse_kernel.h"
 #include "fuse_i.h"
 #include "fuse_opt.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -113,7 +114,8 @@ static size_t cuse_pack_info(int argc, const char **argv, char *buf)
 }
 
 static struct cuse_data *cuse_prep_data(const struct cuse_info *ci,
-					const struct cuse_lowlevel_ops *clop)
+					const struct cuse_lowlevel_ops *clop,
+					size_t clop_size)
 {
 	struct cuse_data *cd;
 	size_t dev_info_len;
@@ -133,7 +135,13 @@ static struct cuse_data *cuse_prep_data(const struct cuse_info *ci,
 		return NULL;
 	}
 
-	memcpy(&cd->clop, clop, sizeof(cd->clop));
+	/*
+	 * Copy only min(caller, library) ops; cd is calloc'd so trailing ops
+	 * stay NULL and a newer library never reads past an older caller.
+	 */
+	if (clop_size > sizeof(cd->clop))
+		clop_size = sizeof(cd->clop);
+	memcpy(&cd->clop, clop, clop_size);
 	cd->max_read = 131072;
 	cd->dev_major = ci->dev_major;
 	cd->dev_minor = ci->dev_minor;
@@ -144,16 +152,16 @@ static struct cuse_data *cuse_prep_data(const struct cuse_info *ci,
 	return cd;
 }
 
-struct fuse_session *cuse_lowlevel_new(struct fuse_args *args,
-				       const struct cuse_info *ci,
-				       const struct cuse_lowlevel_ops *clop,
-				       void *userdata)
+struct fuse_session *
+cuse_lowlevel_new_319(struct fuse_args *args, const struct cuse_info *ci,
+		      const struct cuse_lowlevel_ops *clop, size_t clop_size,
+		      const struct libfuse_version *version, void *userdata)
 {
 	struct fuse_lowlevel_ops lop;
 	struct cuse_data *cd;
 	struct fuse_session *se;
 
-	cd = cuse_prep_data(ci, clop);
+	cd = cuse_prep_data(ci, clop, clop_size);
 	if (!cd)
 		return NULL;
 
@@ -169,7 +177,8 @@ struct fuse_session *cuse_lowlevel_new(struct fuse_args *args,
 	lop.ioctl	= clop->ioctl		? cuse_fll_ioctl	: NULL;
 	lop.poll	= clop->poll		? cuse_fll_poll		: NULL;
 
-	se = fuse_session_new(args, &lop, sizeof(lop), userdata);
+	se = fuse_session_new_versioned(args, &lop, sizeof(lop), version,
+					userdata);
 	if (!se) {
 		free(cd);
 		return NULL;
@@ -232,7 +241,7 @@ void _cuse_lowlevel_init(fuse_req_t req, const fuse_ino_t nodeid,
 	if (bufsize < se->conn.max_write)
 		se->conn.max_write = bufsize;
 
-	se->got_init = 1;
+	WRITE_ONCE(se->got_init, 1);
 	if (se->op.init)
 		se->op.init(se->userdata, &se->conn);
 
@@ -270,10 +279,11 @@ void cuse_lowlevel_init(fuse_req_t req, fuse_ino_t nodeid, const void *inarg)
 	_cuse_lowlevel_init(req, nodeid, inarg, NULL);
 }
 
-struct fuse_session *cuse_lowlevel_setup(int argc, char *argv[],
-					 const struct cuse_info *ci,
-					 const struct cuse_lowlevel_ops *clop,
-					 int *multithreaded, void *userdata)
+struct fuse_session *
+cuse_lowlevel_setup_319(int argc, char *argv[], const struct cuse_info *ci,
+			const struct cuse_lowlevel_ops *clop, size_t clop_size,
+			const struct libfuse_version *version,
+			int *multithreaded, void *userdata)
 {
 	const char *devname = "/dev/cuse";
 	static const struct fuse_opt kill_subtype_opts[] = {
@@ -305,7 +315,8 @@ struct fuse_session *cuse_lowlevel_setup(int argc, char *argv[],
 			close(fd);
 	} while (fd >= 0 && fd <= 2);
 
-	se = cuse_lowlevel_new(&args, ci, clop, userdata);
+	se = cuse_lowlevel_new_319(&args, ci, clop, clop_size, version,
+				   userdata);
 	if (se == NULL)
 		goto out1;
 
@@ -347,15 +358,18 @@ void cuse_lowlevel_teardown(struct fuse_session *se)
 	fuse_session_destroy(se);
 }
 
-int cuse_lowlevel_main(int argc, char *argv[], const struct cuse_info *ci,
-		       const struct cuse_lowlevel_ops *clop, void *userdata)
+static int cuse_lowlevel_main_common(
+	int argc, char *argv[], const struct cuse_info *ci,
+	const struct cuse_lowlevel_ops *clop, size_t clop_size,
+	const struct libfuse_version *version, void *userdata,
+	int (*session_loop)(struct fuse_session *se))
 {
 	struct fuse_session *se;
 	int multithreaded;
 	int res;
 
-	se = cuse_lowlevel_setup(argc, argv, ci, clop, &multithreaded,
-				 userdata);
+	se = cuse_lowlevel_setup_319(argc, argv, ci, clop, clop_size, version,
+				     &multithreaded, userdata);
 	if (se == NULL)
 		return 1;
 
@@ -365,11 +379,94 @@ int cuse_lowlevel_main(int argc, char *argv[], const struct cuse_info *ci,
 		fuse_loop_cfg_destroy(config);
 	}
 	else
-		res = fuse_session_loop(se);
+		res = session_loop(se);
 
 	cuse_lowlevel_teardown(se);
 	if (res == -1)
 		return 1;
 
 	return 0;
+}
+
+int cuse_lowlevel_main_30(int argc, char *argv[], const struct cuse_info *ci,
+			  const struct cuse_lowlevel_ops *clop,
+			  size_t clop_size,
+			  const struct libfuse_version *version,
+			  void *userdata)
+{
+	return cuse_lowlevel_main_common(argc, argv, ci, clop, clop_size,
+					 version, userdata, fuse_session_loop_30);
+}
+
+int cuse_lowlevel_main_319(int argc, char *argv[], const struct cuse_info *ci,
+			   const struct cuse_lowlevel_ops *clop,
+			   size_t clop_size,
+			   const struct libfuse_version *version,
+			   void *userdata)
+{
+	return cuse_lowlevel_main_common(argc, argv, ci, clop, clop_size,
+					 version, userdata, fuse_session_loop_319);
+}
+
+/*
+ * FUSE_3.0 ABI compat: applications built before clop_size/version were added
+ * link these bare names with no size argument. Forward the clop size frozen at
+ * the 3.0 layout so a newer library never reads past an old caller's clop, and
+ * an unknown version.
+ */
+#undef cuse_lowlevel_new
+#undef cuse_lowlevel_setup
+#undef cuse_lowlevel_main
+
+/*
+ * Size of cuse_lowlevel_ops at the FUSE_3.0 ABI. 'poll' is the last 3.0 field;
+ * a field appended after it leaves this unchanged, so the bare symbols below
+ * keep forwarding the original size rather than the library's current one.
+ */
+#define CUSE_LOWLEVEL_OPS_SIZE_30 \
+	(offsetof(struct cuse_lowlevel_ops, poll) + \
+	 sizeof(((const struct cuse_lowlevel_ops *)0)->poll))
+
+struct fuse_session *cuse_lowlevel_new(struct fuse_args *args,
+				       const struct cuse_info *ci,
+				       const struct cuse_lowlevel_ops *clop,
+				       void *userdata);
+struct fuse_session *cuse_lowlevel_new(struct fuse_args *args,
+				       const struct cuse_info *ci,
+				       const struct cuse_lowlevel_ops *clop,
+				       void *userdata)
+{
+	struct libfuse_version version = { 0 };
+
+	return cuse_lowlevel_new_319(args, ci, clop,
+				     CUSE_LOWLEVEL_OPS_SIZE_30, &version,
+				     userdata);
+}
+
+struct fuse_session *cuse_lowlevel_setup(int argc, char *argv[],
+					 const struct cuse_info *ci,
+					 const struct cuse_lowlevel_ops *clop,
+					 int *multithreaded, void *userdata);
+struct fuse_session *cuse_lowlevel_setup(int argc, char *argv[],
+					 const struct cuse_info *ci,
+					 const struct cuse_lowlevel_ops *clop,
+					 int *multithreaded, void *userdata)
+{
+	struct libfuse_version version = { 0 };
+
+	return cuse_lowlevel_setup_319(argc, argv, ci, clop,
+				       CUSE_LOWLEVEL_OPS_SIZE_30,
+				       &version, multithreaded, userdata);
+}
+
+int cuse_lowlevel_main(int argc, char *argv[], const struct cuse_info *ci,
+		       const struct cuse_lowlevel_ops *clop, void *userdata);
+int cuse_lowlevel_main(int argc, char *argv[], const struct cuse_info *ci,
+		       const struct cuse_lowlevel_ops *clop, void *userdata)
+{
+	struct libfuse_version version = { 0 };
+
+	return cuse_lowlevel_main_30(argc, argv, ci, clop,
+				     CUSE_LOWLEVEL_OPS_SIZE_30,
+				     &version, userdata);
 }

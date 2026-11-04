@@ -1,3 +1,60 @@
+Unreleased Changes
+==================
+
+* ``fuse_session_custom_io()`` is disabled unless libfuse is built with
+  ``-Denable-custom-io=true``, and returns ``-ENOTSUP`` otherwise. The
+  ``hello_ll_uds`` example is built only with that option, and enabling it
+  warns at configure time.
+  Reason is a custom io peer might not be a kernel and can
+  forge requests that libfuse parses without bounds checks, crashing or
+  corrupting the filesystem process. See ``doc/README.custom-io``.
+
+* ``fusermount3`` no longer accepts several time stamp related mount options
+  (`atime, diratime, relatime, strictatime, lazytime and
+  nolazytime`). These were added in 3.14.1 by commits
+  1e66c92153d4 ("Add more time mount options") and 81ad52c7dbed ("Add
+  more time mount options to fusermount / fix lazytime"), then dropped
+  again from the library in 3.15 by dba6b3983af3 ("Do not pass
+  unsupported mount options to the kernel"), because for FUSE the
+  filesystem daemon and not the kernel implements atime updates.
+  Left over in fusermount3 was unintended.
+
+* ``fusermount3`` no longer accepts ``-o large_read``; passing it is now
+  an error instead of printing a deprecation notice and ignoring the
+  option. Relevant only for Linux 2.4 kernels, it was dropped from the
+  library in 3.0 by commit d6217bb2a045 ("Drop -o large_read mount
+  option") and from fusermount by 235e9a1f80cb ("fusermout: Remove the
+  large read check").
+
+* ``fuse_session_loop()`` built with FUSE_USE_VERSION 319 or higher calls the
+  filesystem from a worker thread, no longer from the thread that entered the
+  loop. Requests are still handled one at a time. Thread local state has to be
+  set up in a callback instead of before entering the loop.
+
+* ``fuse_session_loop()`` below FUSE_USE_VERSION 319 is deprecated and warns
+  at compile time.
+
+* With ``FUSE_CAP_HANDLE_KILLPRIV_V2`` enabled, ``open``, ``create``,
+  ``write`` and ``write_buf`` now get the kernel's per request kill
+  suid/sgid indication in the new ``fuse_file_info::kill_suidgid`` field.
+  Before, only ``setattr`` saw it, through ``FUSE_SET_ATTR_KILL_SUID``.
+
+* Add support for fuse uring buffer pools (``-o io_uring_bufpool``). Instead
+  of every ring entry registering a payload buffer of its own, userspace hands
+  the kernel one contiguous region of memory for the queue and the kernel
+  manages/optimizes the memory usage for the queue.
+
+* For FUSE_USE_VERSION >= 319 the feature flag FUSE_CAP_AUTO_INVAL_DATA
+  is disabled by default.
+  https://lore.kernel.org/r/20251009110623.3115511-1-giveme.gulu@gmail.com
+
+* New ``fuse_file_info::stream`` field. ``open`` and ``create`` set it for
+  pipe-like ``direct_io`` files, which have no file position. A read and a
+  write on the same fd can then run at the same time, which
+  ``nonseekable`` does not allow. See ``doc/README.stream`` for how the
+  two differ.
+
+
 libfuse 3.18.0 (2025-12-18)
 ===========================
 

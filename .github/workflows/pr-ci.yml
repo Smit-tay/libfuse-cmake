@@ -14,23 +14,88 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: '${{ matrix.os }}'
-    strategy:
-      matrix:
-        os:
-          # 18.04 does not work because of ‘no_sanitize’ attribute
-          # cc1: all warnings being treated as errors
-          # - ubuntu-18.04
-          - ubuntu-latest
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.matrix.outputs.jobs }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.x'
+      - run: pip install pyyaml
+      - id: matrix
+        run: echo "jobs=$(test/ci/run-matrix.py --github-matrix)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: matrix
+    # virtme-ng fetches a release candidate only from 1.30 on, 24.04 ships 1.22
+    runs-on: ${{ matrix.vm && 'ubuntu-26.04' || 'ubuntu-latest' }}
+    name: "build (${{ matrix.config }})"
+    # A guest kernel is a release candidate; its failures must not block a merge.
+    continue-on-error: ${{ matrix.vm }}
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.matrix.outputs.jobs) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.x'
+      - run: pip install pyyaml
       - name: Install dependencies (Ubuntu)
-        if: runner.os == 'Linux'
+        if: ${{ !matrix.vm }}
+        run: ./.github/workflows/install-ubuntu-dependencies.sh --full
+      - name: Install dependencies (Ubuntu, kernel VM)
+        if: matrix.vm
+        run: ./.github/workflows/install-ubuntu-dependencies.sh --kernel-vm
+
+      - if: ${{ !matrix.vm }}
+        run: test/ci/prepare-runner.sh fuse-tests
+      - if: matrix.vm
+        run: test/ci/prepare-runner.sh --vm
+
+      - run: test/ci/run-matrix.py --config ${{ matrix.config }} --work-dir fuse-tests
+
+      - name: Print failed test logs
+        if: failure()
+        run: test/run-tests.py --print-logged-errors fuse-tests/run
+
+      - name: Print dmesg
+        if: failure() && !matrix.vm
+        run: sudo dmesg -T | tail -n 300
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-logs-${{ matrix.config }}
+          # A test killed on timeout runs no cleanup, so a socket it bound in
+          # its log directory is still there; nothing in one can be uploaded.
+          path: |
+            fuse-tests/run/
+            fuse-tests/build-*/meson-logs/
+            !fuse-tests/run/**/core.*
+            !fuse-tests/run/**/mnt
+            !fuse-tests/run/**/*.sock
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # master's branch protection still requires this exact context name
+  # from when the build job's matrix had only the os dimension.
+  build-required-check:
+    name: build (ubuntu-latest)
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: '[[ "${{ needs.build.result }}" == "success" ]]'
+
+  doxygen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies (Ubuntu)
         run: |
           ./.github/workflows/install-ubuntu-dependencies.sh --full
-      - run: test/ci-cmake_build.sh
-
+      - run: test/ci/doxygen.sh

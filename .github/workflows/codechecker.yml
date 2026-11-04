@@ -2,15 +2,10 @@ name: CodeChecker Analysis
 
 on:
   workflow_dispatch:
-  # Auto-runs disabled: this workflow was inherited from upstream libfuse and
-  # is meson-specific (the codechecker.sh script calls `meson setup` and
-  # `meson compile`). This fork builds with CMake, so the analyzer jobs fail
-  # every push with shell syntax errors inside codechecker.sh. Kept around
-  # under workflow_dispatch in case it gets rewritten for CMake later.
-  # push:
-  #   branches: ["master"]
-  # pull_request:
-  #   branches: ["master"]
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
 
 jobs:
   gcc-codechecker:
@@ -22,7 +17,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install dependencies
       run: |
@@ -39,14 +34,14 @@ jobs:
 
     - name: Upload SARIF to GitHub Code Scanning
       if: always()
-      uses: github/codeql-action/upload-sarif@34950e1b113b30df4edee1a6d3a605242df0c40b # v4.35.1
+      uses: github/codeql-action/upload-sarif@ee07b503f465bcf3338b6e4807a36789e3106f4b # v4.35.1
       with:
         sarif_file: builddir/results.sarif
         category: codechecker-gcc
 
     - name: Upload CodeChecker reports
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: codechecker-gcc-reports
         path: builddir/codechecker-reports/**
@@ -61,7 +56,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install dependencies
       run: |
@@ -78,14 +73,14 @@ jobs:
 
     - name: Upload SARIF to GitHub Code Scanning
       if: always()
-      uses: github/codeql-action/upload-sarif@34950e1b113b30df4edee1a6d3a605242df0c40b # v4.35.1
+      uses: github/codeql-action/upload-sarif@ee07b503f465bcf3338b6e4807a36789e3106f4b # v4.35.1
       with:
         sarif_file: builddir/results.sarif
         category: codechecker-infer
 
     - name: Upload CodeChecker reports
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: codechecker-infer-reports
         path: builddir/codechecker-reports/**
@@ -100,7 +95,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
     - name: Install dependencies
       run: |
@@ -117,14 +112,14 @@ jobs:
 
     - name: Upload SARIF to GitHub Code Scanning
       if: always()
-      uses: github/codeql-action/upload-sarif@34950e1b113b30df4edee1a6d3a605242df0c40b # v4.35.1
+      uses: github/codeql-action/upload-sarif@ee07b503f465bcf3338b6e4807a36789e3106f4b # v4.35.1
       with:
         sarif_file: builddir/results.sarif
         category: codechecker-cppcheck
 
     - name: Upload CodeChecker reports
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: codechecker-cppcheck-reports
         path: builddir/codechecker-reports/**

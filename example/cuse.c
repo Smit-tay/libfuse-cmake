@@ -31,7 +31,7 @@
  */
 
 
-#define FUSE_USE_VERSION 31
+#define FUSE_USE_VERSION 319
 
 #include <cuse_lowlevel.h>
 #include <fuse_opt.h>
@@ -92,7 +92,7 @@ static void cusexmp_init(void *userdata, struct fuse_conn_info *conn)
 	(void)userdata;
 
 	/* Disable the receiving and processing of FUSE_INTERRUPT requests */
-	conn->no_interrupt = 1;
+	fuse_set_conn_flag(conn, FUSE_CONN_FLAG_NO_INTERRUPT);
 }
 
 static void cusexmp_open(fuse_req_t req, struct fuse_file_info *fi)
@@ -202,7 +202,7 @@ static void fioc_do_rw(fuse_req_t req, void *addr, const void *in_buf,
 	}
 }
 
-static void cusexmp_ioctl(fuse_req_t req, int cmd, void *arg,
+static void cusexmp_ioctl(fuse_req_t req, unsigned int cmd, void *arg,
 			  struct fuse_file_info *fi, unsigned flags,
 			  const void *in_buf, size_t in_bufsz, size_t out_bufsz)
 {

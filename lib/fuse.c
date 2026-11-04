@@ -1402,10 +1402,13 @@ static void forget_node(struct fuse *f, fuse_ino_t nodeid, uint64_t nlookup)
 
 static void unlink_node(struct fuse *f, struct node *node)
 {
-	if (f->conf.remember) {
-		assert(node->nlookup > 1);
+	/*
+	 * nlookup == 1: the kernel already forgot this node after the
+	 * file vanished underneath the mount, only the remember
+	 * reference is left and fuse_clean_cache() drops it.
+	 */
+	if (f->conf.remember && node->nlookup > 1)
 		node->nlookup--;
-	}
 	unhash_name(f, node);
 }
 
@@ -2271,8 +2274,12 @@ int fuse_fs_poll(struct fuse_fs *fs, const char *path,
 	int res;
 
 	fuse_get_context()->private_data = fs->user_data;
-	if (!fs->op.poll)
+
+	if (!fs->op.poll) {
+		fuse_pollhandle_destroy(ph);
 		return -ENOSYS;
+	}
+
 	if (fs->debug)
 		fuse_log(FUSE_LOG_DEBUG, "poll[%llu] ph: %p, events 0x%x\n",
 			(unsigned long long) fi->fh, ph,
@@ -2685,11 +2692,12 @@ static void fuse_lib_lookup(fuse_req_t req, fuse_ino_t parent,
 	struct node *dot = NULL;
 
 	if (name[0] == '.') {
-		int len = strlen(name);
+		bool isdot = (name[1] == '\0');
+		bool isdotdot = ((name[1] == '.') && (name[2] == '\0'));
 
-		if (len == 1 || (name[1] == '.' && len == 2)) {
+		if (isdot || isdotdot) {
 			pthread_mutex_lock(&f->lock);
-			if (len == 1) {
+			if (isdot) {
 				if (f->conf.debug)
 					fuse_log(FUSE_LOG_DEBUG, "LOOKUP-DOT\n");
 				dot = get_node_nocheck(f, parent);
@@ -4347,6 +4355,8 @@ static void fuse_lib_poll(fuse_req_t req, fuse_ino_t ino,
 		err = fuse_fs_poll(f->fs, path, fi, ph, &revents);
 		fuse_finish_interrupt(f, req, &d);
 		free_path(f, ino, path);
+	} else {
+		fuse_pollhandle_destroy(ph);
 	}
 	if (!err)
 		fuse_reply_poll(req, revents);
@@ -4670,7 +4680,12 @@ static int fuse_session_loop_remember(struct fuse *f)
 	return res < 0 ? -1 : 0;
 }
 
-int fuse_loop(struct fuse *f)
+/*
+ * @param[in] session_loop  serves the requests unless the LRU cache needs the
+ *                          cleanup timer of fuse_session_loop_remember()
+ */
+static int fuse_loop_common(struct fuse *f,
+			    int (*session_loop)(struct fuse_session *se))
 {
 	if (!f)
 		return -1;
@@ -4678,7 +4693,35 @@ int fuse_loop(struct fuse *f)
 	if (lru_enabled(f))
 		return fuse_session_loop_remember(f);
 
-	return fuse_session_loop(f->se);
+	return session_loop(f->se);
+}
+
+int fuse_loop_319(struct fuse *f)
+{
+	int res;
+
+	if (!f)
+		return -1;
+
+	res = fuse_start_cleanup_thread(f);
+	if (res)
+		return -1;
+
+	res = fuse_session_loop_319(f->se);
+	fuse_stop_cleanup_thread(f);
+	return res;
+}
+
+/*
+ * ABI compat: filesystems built before 3.19 link this bare name and expect the
+ * caller's thread to serve the requests.
+ */
+#undef fuse_loop
+
+int fuse_loop(struct fuse *f);
+int fuse_loop(struct fuse *f)
+{
+	return fuse_loop_common(f, fuse_session_loop_30);
 }
 
 FUSE_SYMVER("fuse_loop_mt_312", "fuse_loop_mt@@FUSE_3.12")

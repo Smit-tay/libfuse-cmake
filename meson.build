@@ -69,11 +69,23 @@ args_default = [ '-D_GNU_SOURCE' ]
 #
 private_cfg = configuration_data()
 private_cfg.set_quoted('PACKAGE_VERSION', meson.project_version())
+service_socket_dir = get_option('service-socket-dir')
+service_socket_perms = get_option('service-socket-perms')
+if service_socket_dir == ''
+  service_socket_dir = '/run/fuse'
+endif
+if service_socket_perms == ''
+  service_socket_perms = '0220'
+endif
+private_cfg.set('FUSE_SERVICE_SOCKET_DIR_RAW', service_socket_dir)
+private_cfg.set_quoted('FUSE_SERVICE_SOCKET_DIR', service_socket_dir)
+private_cfg.set('FUSE_SERVICE_SOCKET_PERMS', service_socket_perms)
 
 # Test for presence of some functions
 test_funcs = [ 'fork', 'fstatat', 'openat', 'readlinkat', 'pipe2',
                'splice', 'vmsplice', 'posix_fallocate', 'fdatasync',
-               'utimensat', 'copy_file_range', 'fallocate', 'fspacectl' ]
+               'utimensat', 'copy_file_range', 'fallocate', 'fspacectl',
+               'faccessat' ]
 foreach func : test_funcs
     private_cfg.set('HAVE_' + func.to_upper(),
         cc.has_function(func, prefix: include_default, args: args_default))
@@ -119,7 +131,34 @@ special_funcs = {
 	  }
 	}
     ''',
-    'new_mount_api': '''
+}
+
+foreach name, code : special_funcs
+    private_cfg.set('HAVE_' + name.to_upper(),
+        cc.links(code, args: args_default,
+                 name: name + ' check'))
+endforeach
+
+# New Linux mount API (fsopen/fsconfig/fsmount/move_mount): the kernel
+# syscalls landed in 5.2, but libc wrapper functions can lag behind (e.g.
+# glibc added them only in 2.36). Test kernel header support and libc
+# wrapper support separately, so the direct syscall() fallback wrappers
+# in mount_i_linux.h are used whenever libc lacks them - regardless of
+# which libc or distro that is. The two code snippets and the arg list
+# are named so test/meson.build can reuse them verbatim against fixture
+# headers, instead of duplicating the checks.
+mount_api_headers_check_code = '''
+    #include <linux/mount.h>
+    int main(void) {
+        int x = FSOPEN_CLOEXEC | FSMOUNT_CLOEXEC | MOVE_MOUNT_F_EMPTY_PATH;
+        int y = FSCONFIG_SET_STRING | FSCONFIG_CMD_CREATE;
+        int z = MOUNT_ATTR_RDONLY | MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV |
+                MOUNT_ATTR_NOEXEC | MOUNT_ATTR_NOATIME;
+        return x + y + z;
+    }
+    '''
+
+mount_api_libc_check_code = '''
 	#define _GNU_SOURCE
 	#include <sys/mount.h>
 	#include <linux/mount.h>
@@ -134,13 +173,27 @@ special_funcs = {
 	    return 0;
 	}
     '''
-}
 
-foreach name, code : special_funcs
-    private_cfg.set('HAVE_' + name.to_upper(),
-        cc.links(code, args: args_default,
-                 name: name + ' check'))
-endforeach
+# -Werror=implicit-function-declaration: without it, a missing
+# declaration only warns on some compilers, and the link can still
+# silently succeed against a same-named symbol the libc happens to
+# export - which would defeat the point of testing for the wrapper
+# functions' declared presence.
+mount_api_check_args = args_default + [ '-Werror=implicit-function-declaration' ]
+
+have_new_mount_api_headers = cc.compiles(mount_api_headers_check_code,
+    args: mount_api_check_args,
+    name: 'new mount API headers check')
+
+have_new_mount_api_libc_funcs = cc.links(mount_api_libc_check_code,
+    args: mount_api_check_args,
+    name: 'new mount API libc wrapper check')
+
+private_cfg.set('HAVE_NEW_MOUNT_API', have_new_mount_api_headers)
+if have_new_mount_api_headers and not have_new_mount_api_libc_funcs
+    private_cfg.set('NEED_NEW_MOUNT_API_SYSCALL_WRAPPERS', true)
+    message('libc lacks new mount API wrapper functions, using direct syscalls')
+endif
 
 # Headers checks
 test_headers = [ 'sys/xattr.h', 'linux/limits.h' ]
@@ -169,30 +222,100 @@ private_cfg.set('HAVE_STRUCT_STAT_ST_ATIMESPEC',
                   prefix: include_default + '#include <sys/stat.h>',
                   args: args_default))
 
+# Variable declaration checks
+private_cfg.set('HAVE_ENVIRON_DECL',
+        cc.has_header_symbol('unistd.h', 'environ', args: args_default))
+
 private_cfg.set('USDT_ENABLED', get_option('enable-usdt'))
 
-# Check for liburing with SQE128 support
+# What a session starts with; fuse_session_set_sync_init() still overrides it.
+private_cfg.set('FUSE_SYNC_INIT_DEFAULT',
+    {'auto':   'FUSE_SYNC_INIT_AUTO',
+     'always': 'FUSE_SYNC_INIT_ENABLED',
+     'never':  'FUSE_SYNC_INIT_DISABLED'}[get_option('sync-init')])
+
+# Check for liburing with SQE128 and fixed-buffer uring_cmd support.
+# IORING_URING_CMD_FIXED and sqe->uring_cmd_flags landed a release after
+# IORING_SETUP_SQE128, so testing only the latter leaves headers that pass the
+# probe and then fail to build lib/fuse_uring.c.
 code = '''
 #include <liburing.h>
 #include <stdio.h>
 int main(void) {
     struct io_uring ring;
+    struct io_uring_sqe sqe;
     int ret = io_uring_queue_init(1, &ring, 0);
 #ifndef IORING_SETUP_SQE128
 #error "No SQE128 support"
 #endif
-    return ret;
+#ifndef IORING_URING_CMD_FIXED
+#error "No uring_cmd fixed buffer support"
+#endif
+    sqe.uring_cmd_flags = 0;
+    return ret + sqe.uring_cmd_flags;
 }'''
 
 liburing = dependency('liburing', required: false)
-libnuma = dependency('numa', required: false)
 
-if get_option('enable-io-uring') and liburing.found() and libnuma.found()
+if get_option('enable-io-uring') and liburing.found()
    if cc.links(code,
-              name: 'liburing linking and SQE128 support',
+              name: 'liburing linking, SQE128 and fixed uring_cmd support',
               dependencies: [liburing])
       private_cfg.set('HAVE_URING', true)
    endif
+endif
+
+# A custom io peer might not be a kernel and can forge requests libfuse parses
+# without bounds checks. Off unless a build asks for it.
+private_cfg.set('HAVE_CUSTOM_IO', get_option('enable-custom-io'))
+if get_option('enable-custom-io')
+    warning('enable-custom-io lets a peer that might not be a kernel send ' +
+            'requests that libfuse parses without bounds checks, so a ' +
+            'forged request can crash or corrupt the filesystem process - ' +
+            'see doc/README.custom-io.')
+endif
+
+# Check for systemd support
+#
+# Only the SD_LISTEN_FDS_START macro is used, so the header alone decides
+# this - a link test would additionally demand libsystemd, which nothing
+# here links against.
+private_cfg.set('HAVE_SYSTEMD_HEADERS',
+    cc.has_header('systemd/sd-daemon.h'))
+
+# Only systemd.pc names the unit directory, and it might ship in a package of
+# its own (Debian: systemd-dev); the libsystemd.pc installed with the headers
+# does not carry it. So fall back to looking for the directory itself, rather
+# than dropping systemd support on a host that plainly has systemd.
+systemd_system_unit_dir = get_option('systemd-system-unit-dir')
+if systemd_system_unit_dir == ''
+  systemd = dependency('systemd', required: false)
+  if systemd.found()
+     systemd_system_unit_dir = systemd.get_variable(pkgconfig: 'systemd_system_unit_dir')
+  else
+    # second path for distros without a merged /usr
+    fs = import('fs')
+    foreach dir : [ '/usr/lib/systemd/system', '/lib/systemd/system' ]
+      if fs.is_dir(dir)
+        systemd_system_unit_dir = dir
+        break
+      endif
+    endforeach
+  endif
+endif
+
+if systemd_system_unit_dir == '' or private_cfg.get('HAVE_SYSTEMD_HEADERS', false) == false
+  if systemd_system_unit_dir == ''
+    warning('systemd service support will not be built: systemd unit directory not found')
+  elif private_cfg.get('HAVE_SYSTEMD_HEADERS', false) == false
+    warning('systemd service support will not be built: systemd headers (libsystemd-dev) not found')
+  else
+    warning('systemd service support will not be built')
+  endif
+else
+  private_cfg.set_quoted('SYSTEMD_SYSTEM_UNIT_DIR', systemd_system_unit_dir)
+  private_cfg.set('HAVE_SYSTEMD', true)
+  private_cfg.set('HAVE_SERVICEMOUNT', true)
 endif
 
 #
@@ -329,7 +452,8 @@ thread_dep = dependency('threads')
 # Read build files from sub-directories
 #
 subdirs = [ 'lib', 'include']
-if get_option('utils') and not platform.endswith('bsd') and platform != 'dragonfly'
+build_utils = get_option('utils') and not platform.endswith('bsd') and platform != 'dragonfly'
+if build_utils
   subdirs += [ 'util', 'doc' ]
 endif
 
@@ -345,3 +469,20 @@ foreach n : subdirs
     subdir(n)
 endforeach
 
+#
+# Configuration summary
+#
+summary({
+  'Examples': get_option('examples'),
+  'Tests': get_option('tests'),
+  'Utils': get_option('utils'),
+}, section: 'Build Options')
+
+summary({
+  'io_uring support': private_cfg.get('HAVE_URING', false),
+  'custom io support': private_cfg.get('HAVE_CUSTOM_IO', false),
+  'USDT tracing': private_cfg.get('USDT_ENABLED', false),
+  'systemd service support': private_cfg.get('HAVE_SYSTEMD', false),
+  'systemd headers': private_cfg.get('HAVE_SYSTEMD_HEADERS', false),
+  'systemd unit directory': systemd_system_unit_dir != '' ? systemd_system_unit_dir : '(not found)',
+}, section: 'Features')

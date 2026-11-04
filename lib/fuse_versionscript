@@ -224,6 +224,7 @@ FUSE_3.18 {
 
 FUSE_3.19 {
 	global:
+		fuse_set_conn_flag;
 		fuse_session_start_teardown_watchdog;
 		fuse_session_stop_teardown_watchdog;
 		fuse_lowlevel_notify_prune;
@@ -232,6 +233,35 @@ FUSE_3.19 {
 		fuse_daemonize_early_fail;
 		fuse_daemonize_early_is_active;
 		fuse_session_set_debug;
+		fuse_session_set_sync_init;
+		fuse_service_accept;
+		fuse_service_append_args;
+		fuse_service_can_allow_other;
+		fuse_service_can_fuseblk;
+		fuse_service_cmdline;
+		fuse_service_destroy;
+		fuse_service_exit;
+		fuse_service_expect_mount_format;
+		fuse_service_finish_file_requests;
+		fuse_service_main_real_versioned;
+		fuse_service_parse_cmdline_opts;
+		fuse_service_receive_file;
+		fuse_service_release;
+		fuse_service_request_file;
+		fuse_service_request_blockdev;
+		fuse_service_send_goodbye;
+		fuse_service_session_mount;
+		fuse_req_secctx_count;
+		fuse_req_secctx_reset;
+		fuse_req_secctx_next;
+
+		cuse_lowlevel_new_319;
+		cuse_lowlevel_setup_319;
+		cuse_lowlevel_main_30;
+		cuse_lowlevel_main_319;
+
+		fuse_session_loop_319;
+		fuse_loop_319;
 } FUSE_3.18;
 
 # Local Variables:

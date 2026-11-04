@@ -58,6 +58,7 @@
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 19)
 
 #include <fuse_lowlevel.h>
+#include <fuse_daemonize.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -82,6 +83,7 @@
 static char file_contents[MAX_STR_LEN];
 static int lookup_cnt;
 static size_t file_size;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; /* the three above */
 static _Atomic bool is_stop;
 
 /* Command line parsing */
@@ -102,10 +104,11 @@ static const struct fuse_opt option_spec[] = {
 
 static void update_fs(void)
 {
+	struct tm tmbuf;
 	struct tm *now;
 	time_t t = time(NULL);
 
-	now = localtime(&t);
+	now = localtime_r(&t, &tmbuf);
 	assert(now != NULL);
 
 	file_size = strftime(file_contents, MAX_STR_LEN,
@@ -124,7 +127,9 @@ static int tfs_stat(fuse_ino_t ino, struct stat *stbuf)
 	else if (ino == FILE_INO) {
 		stbuf->st_mode = S_IFREG | 0444;
 		stbuf->st_nlink = 1;
+		pthread_mutex_lock(&lock);
 		stbuf->st_size = file_size;
+		pthread_mutex_unlock(&lock);
 	}
 
 	else
@@ -137,8 +142,10 @@ static void tfs_init(void *userdata, struct fuse_conn_info *conn)
 {
 	(void)userdata;
 
+	fuse_set_conn_flag(conn, FUSE_CONN_FLAG_SINGLE_ISSUER);
+
 	/* Disable the receiving and processing of FUSE_INTERRUPT requests */
-	conn->no_interrupt = 1;
+	fuse_set_conn_flag(conn, FUSE_CONN_FLAG_NO_INTERRUPT);
 }
 
 static void tfs_destroy(void *userarg)
@@ -158,7 +165,9 @@ static void tfs_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 		goto err_out;
 	else if (strcmp(name, FILE_NAME) == 0) {
 		e.ino = FILE_INO;
+		pthread_mutex_lock(&lock);
 		lookup_cnt++;
+		pthread_mutex_unlock(&lock);
 	} else
 		goto err_out;
 
@@ -173,13 +182,41 @@ err_out:
 	fuse_reply_err(req, ENOENT);
 }
 
+/*
+ * Progress marker: a prune has taken effect and the contents are new, so a
+ * test can wait for this line instead of for a fixed time, which would race
+ * the daemon. Flushed because stdout is a file when logged.
+ *
+ * This function is a workaround for missing fuse_log_once()
+ */
+static void print_once(_Atomic bool *printed, const char *str)
+{
+	/* Two session threads can be in here at once, and both would print
+	 * if the flag were read and set separately.
+	 */
+	if (!atomic_exchange(printed, true)) {
+		printf("%s\n", str);
+		fflush(stdout);
+	}
+}
+
 static void tfs_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 {
+	bool pruned = false;
+
 	(void)req;
 	if (ino == FILE_INO) {
+		pthread_mutex_lock(&lock);
 		lookup_cnt -= nlookup;
-		if (!lookup_cnt)
+		if (!lookup_cnt) {
 			update_fs();
+			pruned = true;
+		}
+		pthread_mutex_unlock(&lock);
+		if (pruned) {
+			static _Atomic bool printed;
+			print_once(&printed, "prune complete");
+		}
 	} else {
 		assert(ino == FUSE_ROOT_ID);
 	}
@@ -272,10 +309,17 @@ static void tfs_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 static void tfs_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 		     struct fuse_file_info *fi)
 {
+	char contents[MAX_STR_LEN];
+	size_t contents_size;
+
 	(void)fi;
 
 	assert(ino == FILE_INO);
-	reply_buf_limited(req, file_contents, file_size, off, size);
+	pthread_mutex_lock(&lock);
+	contents_size = file_size;
+	memcpy(contents, file_contents, contents_size);
+	pthread_mutex_unlock(&lock);
+	reply_buf_limited(req, contents, contents_size, off, size);
 }
 
 static const struct fuse_lowlevel_ops tfs_oper = {
@@ -292,9 +336,13 @@ static const struct fuse_lowlevel_ops tfs_oper = {
 static void *update_fs_loop(void *data)
 {
 	struct fuse_session *se = (struct fuse_session *)data;
+	bool looked_up;
 
 	while (!is_stop) {
-		if (!options.no_notify && lookup_cnt) {
+		pthread_mutex_lock(&lock);
+		looked_up = lookup_cnt != 0;
+		pthread_mutex_unlock(&lock);
+		if (!options.no_notify && looked_up) {
 			fuse_ino_t nodeids = FILE_INO;
 			/* Only send notification if the kernel is aware of the inode */
 
@@ -304,12 +352,31 @@ static void *update_fs_loop(void *data)
 			 */
 			int ret = fuse_lowlevel_notify_prune(se, &nodeids, 1);
 
+			if (ret == -ENOSYS) {
+				printf("fuse_lowlevel_notify_prune not supported by kernel\n");
+				/*
+				 * stdout is fully buffered once redirected to a
+				 * file, and this thread's loop is the only thing
+				 * that exits - the session loop keeps the daemon
+				 * running - so without an explicit flush the line
+				 * above never reaches the log.
+				 */
+				fflush(stdout);
+				break;
+			}
+
+			/* Linux 7.1+ gives EINVAL once the connection is gone */
 			if ((ret != 0 && !is_stop) && ret != -ENOENT &&
-			     ret != -EBADF && ret != -ENODEV) {
+			     ret != -EBADF && ret != -ENODEV && ret != -EINVAL) {
 				fprintf(stderr,
-					"ERROR: fuse_lowlevel_notify_store() failed with %s (%d)\n",
+					"ERROR: fuse_lowlevel_notify_prune() failed with %s (%d)\n",
 					strerror(-ret), -ret);
 				abort();
+			}
+
+			if (ret == 0) {
+				static _Atomic bool printed;
+				print_once(&printed, "prune sent");
 			}
 		}
 		sleep(options.update_interval);
@@ -366,10 +433,14 @@ int main(int argc, char *argv[])
 	if (fuse_set_signal_handlers(se) != 0)
 		goto err_out2;
 
+	if (fuse_daemonize_early_start(opts.foreground ?
+				       FUSE_DAEMONIZE_NO_BACKGROUND : 0) != 0)
+		goto err_out3;
+
 	if (fuse_session_mount(se, opts.mountpoint) != 0)
 		goto err_out3;
 
-	fuse_daemonize(opts.foreground);
+	fuse_daemonize_early_success();
 
 	/* Start thread to update file contents */
 	ret = pthread_create(&updater, NULL, update_fs_loop, (void *)se);
@@ -391,6 +462,9 @@ int main(int argc, char *argv[])
 		config = NULL;
 	}
 
+	/* the updater writes to the session fd, which the unmount closes */
+	is_stop = true;
+	pthread_join(updater, NULL);
 	fuse_session_unmount(se);
 err_out3:
 	fuse_remove_signal_handlers(se);

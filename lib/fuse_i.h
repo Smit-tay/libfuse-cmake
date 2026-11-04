@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdatomic.h>
+#include <stdlib.h>
 
 #ifndef MIN
 #define MIN(a, b) \
@@ -27,6 +28,14 @@
 	_a < _b ? _a : _b;						\
 })
 #endif
+
+/* The test suite finds these lines by their "FUSE_INIT: " prefix */
+#define EMIT_INIT_STATUS_LINE(fmt, ...)					\
+do {									\
+	if (getenv("FUSE_INIT_STATUS"))					\
+		fuse_log(FUSE_LOG_INFO, "FUSE_INIT: " fmt "\n",		\
+			 ##__VA_ARGS__);					\
+} while (0)
 
 struct fuse_ring_pool;
 
@@ -54,6 +63,12 @@ struct fuse_req {
 	} u;
 	struct fuse_req *next;
 	struct fuse_req *prev;
+
+	void *secctx;
+	size_t secctx_len;
+	uint32_t secctx_count;      /* Number of security contexts (nr_secctx) */
+	uint32_t secctx_iter_index; /* Current iterator position */
+	const char *secctx_iter_ptr; /* Current iterator pointer */
 };
 
 struct fuse_notify_req {
@@ -64,16 +79,45 @@ struct fuse_notify_req {
 	struct fuse_notify_req *prev;
 };
 
+typedef void (*fuse_teardown_waiting_fn)(void);
+
 struct fuse_session_uring {
-	bool enable;
+	/* the wish until FUSE_INIT is negotiated, the result afterwards */
+	bool enabled;
 	unsigned int q_depth;
+
+	/*
+	 * Let the kernel manage the memory regions for the queues instead of
+	 * libfuse allocating + binding a buffer to every ring entry. Requires
+	 * FUSE_CAP_IO_URING_BUFPOOL.
+	 */
+	bool bufpool;
+
 	struct fuse_ring_pool *pool;
+	_Atomic fuse_teardown_waiting_fn fsu_test_teardown_waiting;
 };
 
 struct fuse_timeout_thread;
 
+enum fuse_sync_init {
+	FUSE_SYNC_INIT_AUTO = 0, /* auto detection using fuse_daemonize_early_start */
+	FUSE_SYNC_INIT_DISABLED, /* sync init forcefully disabled */
+	FUSE_SYNC_INIT_ENABLED   /* sync_init forcefully enabled */
+};
+
 struct fuse_session {
 	_Atomic(char *)mountpoint;
+
+	/*
+	 * Held by the caller of fuse_session_new(), by every /dev/fuse
+	 * request in flight and by the io-uring pool. The session is torn
+	 * down by whoever drops the last one, which need not be the caller.
+	 */
+	_Atomic int ref_cnt;
+
+	/* reaching ref_cnt 0 before this is set means an unpaired put */
+	bool destroy_called;
+
 	int fd;
 	struct fuse_custom_io *io;
 	struct mount_opts *mo;
@@ -91,6 +135,8 @@ struct fuse_session {
 	int got_destroy;
 	pthread_key_t pipe_key;
 	int broken_splice_nonblock;
+	/* set at runtime; conn.want_ext is read unlocked by every worker */
+	bool splice_read_off;
 	uint64_t notify_ctr;
 	struct fuse_notify_req notify_list;
 	_Atomic size_t bufsize;
@@ -111,11 +157,17 @@ struct fuse_session {
 	bool buf_reallocable;
 
 	/* synchronous FUSE_INIT support */
-	bool want_sync_init;
+	enum fuse_sync_init want_sync_init;
 	bool is_sync_init; /* sync FUSE_INIT mount succeeded*/
 	pthread_t init_thread;
 	int init_error;
 	int init_wakeup_fd;
+
+	/*
+	 * auto_unmount fusermount3 comm socket; closing it triggers the unmount,
+	 * so it is held open for the session lifetime. -1 if unused.
+	 */
+	int auto_unmount_fd;
 
 	/* io_uring */
 	struct fuse_session_uring uring;
@@ -184,7 +236,7 @@ struct fuse_loop_config
 	/**
 	 * The maximum number of available worker threads before they
 	 * start to get deleted when they become idle. If not
-	 * specified, the default is 10.
+	 * specified, the default is -1.
 	 *
 	 * Adjusting this has performance implications; a very small number
 	 * of threads in the pool will cause a lot of thread creation and
@@ -222,6 +274,23 @@ struct fuse_chan *fuse_chan_get(struct fuse_chan *ch);
  */
 void fuse_chan_put(struct fuse_chan *ch);
 
+/**
+ * Take a counted reference to a session
+ *
+ * @param se the session
+ */
+void fuse_session_get(struct fuse_session *se);
+
+/**
+ * Drop a counted reference to a session
+ *
+ * The last reference destroys the session, so the caller must not touch it
+ * afterwards.
+ *
+ * @param se the session
+ */
+void fuse_session_put(struct fuse_session *se);
+
 /* Mount-related functions */
 void fuse_mount_version(void);
 void fuse_kern_unmount(const char *mountpoint, int fd);
@@ -254,6 +323,12 @@ struct fuse *fuse_new_31(struct fuse_args *args, const struct fuse_operations *o
 		      size_t op_size, void *private_data);
 int fuse_loop_mt_312(struct fuse *f, struct fuse_loop_config *config);
 int fuse_session_loop_mt_312(struct fuse_session *se, struct fuse_loop_config *config);
+
+/* the pre-3.19 loop, for callers that need the caller's thread to serve */
+int fuse_session_loop_30(struct fuse_session *se);
+
+/* FUSE_USE_VERSION of the caller; 3.0 if missing or out of range */
+uint32_t fuse_get_api_version(const struct libfuse_version *version);
 
 /**
  * Internal verifier for the given config.

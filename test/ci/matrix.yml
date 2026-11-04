@@ -1,0 +1,135 @@
+# Every CI build configuration. Each entry is forwarded verbatim to
+# test/ci-build.sh by test/ci/run-matrix.py. "vm: true" runs it in a
+# virtme-ng guest booting "kernel"; without it, it runs on the runner's kernel.
+configs:
+  - config: gcc
+    cc: gcc
+  - config: gcc-root
+    cc: gcc
+    root: true
+  - config: gcc-io-uring
+    cc: gcc
+    io_uring: true
+    vm: true
+    kernel: latest-rc
+  # Buffer pools need Linux 7.3, which no runner image ships.
+  - config: gcc-io-uring-bufpool
+    cc: gcc
+    io_uring: true
+    io_uring_bufpool: true
+    vm: true
+    kernel: latest-rc
+  - config: gcc-io-uring-root
+    cc: gcc
+    root: true
+    io_uring: true
+    vm: true
+    kernel: latest-rc
+  - config: gcc-io-uring-root-bufpool
+    cc: gcc
+    root: true
+    io_uring: true
+    io_uring_bufpool: true
+    vm: true
+    kernel: latest-rc
+  - config: gcc-san-lto
+    cc: gcc
+    sanitize: true
+    meson_opts:
+      - -Db_lto=true
+  - config: gcc-san-lto-root
+    cc: gcc
+    sanitize: true
+    root: true
+    meson_opts:
+      - -Db_lto=true
+  - config: gcc-valgrind
+    cc: gcc
+    valgrind: true
+  - config: clang
+    cc: clang
+    cxx: clang++
+  - config: clang-san
+    cc: clang
+    cxx: clang++
+    sanitize: true
+  - config: clang-san-root
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    root: true
+  - config: clang-san-io-uring
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    io_uring: true
+    vm: true
+    kernel: latest-rc
+  - config: clang-san-io-uring-root
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    root: true
+    io_uring: true
+    vm: true
+    kernel: latest-rc
+  - config: clang-san-io-uring-root-bufpool
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    root: true
+    io_uring: true
+    io_uring_bufpool: true
+    vm: true
+    kernel: latest-rc
+  - config: clang-san-nosymver
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    meson_opts:
+      - -Ddisable-libc-symbol-version=true
+  - config: clang-san-noiouring
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    meson_opts:
+      - -Denable-io-uring=false
+  - config: clang-san-custom-io
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    meson_opts:
+      - -Denable-custom-io=true
+  # The daemons a test backgrounds get synchronous FUSE_INIT
+  # everywhere else, so this is the only job running the classic path.
+  - config: clang-san-nosyncinit
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    meson_opts:
+      - -Dsync-init=never
+  - config: clang-san-m32
+    cc: clang
+    cxx: clang++
+    sanitize: true
+    meson_opts:
+      - -Dc_args=-m32
+      - -Dcpp_args=-m32
+      - -Dc_link_args=-m32
+      - -Dcpp_link_args=-m32
+      - --pkg-config-path=/usr/lib/i386-linux-gnu/pkgconfig
+  - config: clang-tsan-io-uring
+    cc: clang
+    cxx: clang++
+    tsan: true
+    io_uring: true
+    vm: true
+    kernel: latest-rc
+  - config: clang-tsan-io-uring-root
+    cc: clang
+    cxx: clang++
+    tsan: true
+    root: true
+    io_uring: true
+    vm: true
+    kernel: latest-rc

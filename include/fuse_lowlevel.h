@@ -25,6 +25,7 @@
 #include "fuse_common.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <utime.h>
 #include <fcntl.h>
 #include <sys/types.h>
@@ -1414,7 +1415,7 @@ int fuse_reply_entry(fuse_req_t req, const struct fuse_entry_param *e);
  *
  * currently the following members of 'fi' are used:
  *   fh, direct_io, keep_cache, cache_readdir, nonseekable, noflush,
- *   parallel_direct_writes
+ *   parallel_direct_writes, stream
  *
  * Possible requests:
  *   create
@@ -1476,7 +1477,7 @@ int fuse_passthrough_close(fuse_req_t req, int backing_id);
  *
  * currently the following members of 'fi' are used:
  *   fh, direct_io, keep_cache, cache_readdir, nonseekable, noflush,
- *   parallel_direct_writes,
+ *   parallel_direct_writes, stream
  *
  * Possible requests:
  *   open, opendir
@@ -1825,7 +1826,7 @@ int fuse_lowlevel_notify_increment_epoch(struct fuse_session *se);
  *
  * @param se the session object
  * @param parent inode number
- * @param name file name
+ * @param name file name (null terminated)
  * @param namelen strlen() of file name
  * @return zero for success, -errno for failure
  */
@@ -1856,7 +1857,7 @@ int fuse_lowlevel_notify_inval_entry(struct fuse_session *se, fuse_ino_t parent,
  *
  * @param se the session object
  * @param parent inode number
- * @param name file name
+ * @param name file name (null terminated)
  * @param namelen strlen() of file name
  * @return zero for success, -errno for failure, -enosys if no kernel support
 */
@@ -1887,7 +1888,7 @@ int fuse_lowlevel_notify_expire_entry(struct fuse_session *se, fuse_ino_t parent
  * @param se the session object
  * @param parent inode number
  * @param child inode number
- * @param name file name
+ * @param name file name (null terminated)
  * @param namelen strlen() of file name
  * @return zero for success, -errno for failure
  */
@@ -1998,6 +1999,55 @@ void *fuse_req_userdata(fuse_req_t req);
  * @return the context structure
  */
 const struct fuse_ctx *fuse_req_ctx(fuse_req_t req);
+
+/**
+ * Get the number of security contexts in the request
+ *
+ * Returns the number of security contexts sent by the kernel for file
+ * creation operations when FUSE_CAP_SECURITY_CTX is enabled.
+ *
+ * With LSM stacking, multiple security modules (SELinux, AppArmor, Smack)
+ * can each contribute a context, so this can return > 1.
+ *
+ * @param req request handle
+ * @return number of security contexts (0 if none)
+ */
+uint32_t fuse_req_secctx_count(fuse_req_t req);
+
+/**
+ * Reset security context iterator to the beginning
+ *
+ * Call this to restart iteration from the first security context.
+ *
+ * @param req request handle
+ */
+void fuse_req_secctx_reset(fuse_req_t req);
+
+/**
+ * Get next security context from the request
+ *
+ * This iterates through security contexts one at a time. Each call returns
+ * the next context until all contexts have been returned.
+ *
+ * The name and value pointers remain valid for the lifetime of the request.
+ *
+ * Example:
+ *   fuse_req_secctx_reset(req);
+ *   const char *name, *value;
+ *   uint32_t value_len;
+ *   while (fuse_req_secctx_next(req, &name, &value, &value_len) == 0) {
+ *       // Process security context
+ *       setxattr(path, name, value, value_len, 0);
+ *   }
+ *
+ * @param req request handle
+ * @param name output pointer for context name (e.g., "security.selinux")
+ * @param value output pointer for context value
+ * @param value_len output pointer for context value length
+ * @return 0 on success, -ENOENT if no more contexts
+ */
+int fuse_req_secctx_next(fuse_req_t req, const char **name,
+			 const char **value, uint32_t *value_len);
 
 /**
  * Get the current supplementary group IDs for the specified request
@@ -2174,7 +2224,7 @@ fuse_session_new_fn(struct fuse_args *args, const struct fuse_lowlevel_ops *op,
 		.major = FUSE_MAJOR_VERSION,
 		.minor = FUSE_MINOR_VERSION,
 		.hotfix = FUSE_HOTFIX_VERSION,
-		.padding = 0
+		.api_version = FUSE_USE_VERSION
 	};
 
 	return fuse_session_new_versioned(args, op, op_size, &version,
@@ -2204,8 +2254,15 @@ int fuse_session_custom_io_317(struct fuse_session *se,
  * and `splice_receive` are optional. If they are not provided splice will not
  * be used for send or receive respectively.
  *
- * The provided file descriptor `fd` will be closed when fuse_session_destroy()
- * is called.
+ * The provided file descriptor `fd` will be closed when the session is freed:
+ * by fuse_session_destroy(), or by the last reply still in flight then.
+ *
+ * Requires a library built with -Denable-custom-io=true. The peer at the other
+ * end of `fd` takes the place of the kernel as the sender of requests, so it
+ * owes the session the validation the kernel would have done -- libfuse does
+ * not repeat it. A request whose length or count field exceeds the bytes that
+ * actually arrived makes the handlers read past the receive buffer and crash
+ * the filesystem process.
  *
  * @param se session object
  * @param io Custom io to use when retrieving/sending requests/responses
@@ -2215,6 +2272,7 @@ int fuse_session_custom_io_317(struct fuse_session *se,
  * @return -EINVAL if `io`, `io->read` or `ìo->writev` are NULL
  * @return -EBADF  if `fd` was smaller than 0
  * @return -errno  if failed to allocate memory to store `io`
+ * @return -ENOTSUP if the library was built without custom io
  *
  **/
 #if FUSE_MAKE_VERSION(3, 17) <= FUSE_USE_VERSION
@@ -2245,6 +2303,17 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint);
 /**
  * Enter a single threaded, blocking event loop.
  *
+ * Below FUSE_USE_VERSION 3.19 the caller's thread receives and processes the
+ * requests, and fuse_session_exit() does not wake the loop - while it is
+ * blocked reading from /dev/fuse it only notices the flag once the next
+ * request arrives. That variant is deprecated.
+ *
+ * From FUSE_USE_VERSION 3.19 on, requests are still handled one at a time, but
+ * by a worker thread instead of the calling thread, and fuse_session_exit()
+ * returns the loop without waiting for a request. Filesystems that set up
+ * thread local state before entering the loop have to move that setup into a
+ * callback.
+ *
  * When the event loop terminates because the connection to the FUSE
  * kernel module has been closed, this function returns zero. This
  * happens when the filesystem is unmounted regularly (by the
@@ -2264,7 +2333,13 @@ int fuse_session_mount(struct fuse_session *se, const char *mountpoint);
  * @param se the session
  * @return 0, -errno, or a signal value
  */
-int fuse_session_loop(struct fuse_session *se);
+#if FUSE_USE_VERSION >= FUSE_MAKE_VERSION(3, 19)
+	int fuse_session_loop_319(struct fuse_session *se);
+	#define fuse_session_loop(se) fuse_session_loop_319(se)
+#else
+	int fuse_session_loop(struct fuse_session *se)
+		__attribute__((deprecated("raise FUSE_USE_VERSION to 3.19")));
+#endif
 
 #if FUSE_USE_VERSION < 32
 	int fuse_session_loop_mt_31(struct fuse_session *se, int clone_fd);
@@ -2295,12 +2370,17 @@ int fuse_session_loop(struct fuse_session *se);
 /**
  * Flag a session as terminated.
  *
- * This will cause any running event loops to terminate on the next opportunity. If this function is
- * called by a thread that is not a FUSE worker thread, the next
- * opportunity will be when FUSE a request is received (which may be far in the future if the
- * filesystem is not currently being used by any clients). One way to avoid this delay is to
- * afterwards sent a signal to the main thread (if fuse_set_signal_handlers() is used, SIGPIPE
- * will cause the main thread to wake-up but otherwise be ignored).
+ * This will cause any running event loop to terminate on the next opportunity.
+ * fuse_session_loop_mt(), and fuse_session_loop() from FUSE_USE_VERSION 3.19
+ * on, are woken up directly and return without waiting for a request, no
+ * matter which thread calls this.
+ *
+ * The deprecated fuse_session_loop() below FUSE_USE_VERSION 3.19 is not woken
+ * up and only notices the flag once the next request is received, which may be
+ * far in the future if the filesystem is not currently being used by any
+ * clients. Sending a signal to its thread afterwards avoids that delay - if
+ * fuse_set_signal_handlers() is used, SIGPIPE will cause the thread to wake-up
+ * but otherwise be ignored.
  *
  * @param se the session
  */
@@ -2438,9 +2518,13 @@ int fuse_session_receive_buf(struct fuse_session *se, struct fuse_buf *buf);
  * called after this if io-uring is enabled. Also see
  * fuse_session_daemonize_start().
  *
+ * @param se the session
+ * @param enable disable auto-detection based on fuse_daemonize_early_start,
+ *               true to forcefully enable, false to forcefully disable
+ *
  * This must be called before fuse_session_mount() to have any effect.
  */
-void fuse_session_want_sync_init(struct fuse_session *se);
+void fuse_session_set_sync_init(struct fuse_session *se, bool enable);
 
 /**
  * Check if the connection / session is using synchronous FUSE_INIT
@@ -2475,6 +2559,13 @@ bool fuse_req_is_uring(fuse_req_t req);
  * to the request buffer. With io-uring the req is the buffer owner
  * and the file system can write directly to the buffer and avoid
  * extra copying. For example useful for network file systems.
+ *
+ * Only call this on operations that carry a payload, i.e. ones the
+ * file system answers with data. An operation that replies with no
+ * more than a status - FLUSH, RELEASE, FSYNC - has no buffer of its
+ * own: with a per entry payload buffer the returned pointer is one
+ * this request will never send, and with an io-uring buffer pool it
+ * may belong to another request in flight.
  *
  * @param req the request
  * @param payload pointer to the payload

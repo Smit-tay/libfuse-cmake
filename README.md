@@ -112,30 +112,20 @@ To build, test and install, you then use make (or other supported build systems)
     $ meson setup --reconfigure ../
 
 
-IMPORTANT !!! - Almost all tests will fail unless you either
-  - run as root
-  - change permissions on  util/fusermount3 (see blow)
-
-```
     $ make
-    $ python3 -m pytest test/
+    $ sudo ../test/run-tests.py --build-dir .
     $ sudo make install
-```
 
-NOTE:  One of the primary outstanding issues (with this libfuse-Cmake fork) is
-to remove any dependency upon python.  Expect to see native ctest replace python
-pytest soon.  IMPORTANT - Tests current perform best when run under python3.6.
-Issues have been reported attempting to use python3.7 with pytest.
+Running the tests requires bash, Python 3 and (to resolve core dumps)
+gdb. Instead of running the tests as root, the majority of tests can
+also be run as a regular user if *util/fusermount3* is made setuid root
+first; the rest then skip themselves:
 
-Running the tests requires the [py.test](http://www.pytest.org/) Python module. 
+    $ ../test/run-tests.py --build-dir . --setuid-helpers
 
-Instead of running the tests as root, the majority of
-tests can also be run as a regular user if *util/fusermount3* is made
-setuid root first:
-
-    $ sudo chown root:root util/fusermount3
-    $ sudo chmod 4755 util/fusermount3
-    $ python3 -m pytest test/
+Each test gets its own working and log directory, and the runner prints
+what every one of them cost. See the README under *test/cases* for how
+to add one and where to look when one fails.
 
 NOTE: Some tests are designed to "drop privileges" and so will be skipped if the
 user is not root.
@@ -145,6 +135,9 @@ Security implications
 
 The *fusermount3* program is installed setuid root. This is done to
 allow normal users to mount their own filesystem implementations.
+If built, the *fuservicemount3* program will also be installed setuid
+root so that normal users can access containerized filesystem
+implementations.
 
 To limit the harm that malicious users can do this way, *fusermount3*
 enforces the following limitations:
@@ -201,9 +194,10 @@ directory and at http://libfuse.github.io/doxygen.
 Getting Help
 ------------
 
-If you need help, please ask on the <fuse-devel@lists.sourceforge.net>
-mailing list (subscribe at
-https://lists.sourceforge.net/lists/listinfo/fuse-devel).
+If you need help, please ask on the <fuse-devel@lists.linux.dev>
+mailing list (subscribe by mailing
+<fuse-devel+subscribe@lists.linux.dev>, archive at
+https://lore.kernel.org/fuse-devel/).
 
 Please report any bugs on the GitHub issue tracker at
 https://github.com/libfuse/libfuse/issues.

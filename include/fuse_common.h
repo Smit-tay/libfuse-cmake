@@ -73,8 +73,11 @@ struct fuse_file_info {
 	    operation. */
 	uint32_t flush : 1;
 
-	/** Can be filled in by open, to indicate that the file is not
-	    seekable. */
+	/**
+	 * Can be filled in by open, to indicate that the file is not
+	 * seekable. 'stream' is preferred for pipe-like files, see
+	 * <libfuse>/doc/README.stream.
+	 */
 	uint32_t nonseekable : 1;
 
 	/* Indicates that flock locks for this file should be
@@ -96,8 +99,23 @@ struct fuse_file_info {
 	    file */
 	uint32_t parallel_direct_writes : 1;
 
+	/**
+	 * Set in open, create and write when KILLPRIV_V2 was negotiated and
+	 * the application issuing the syscall lacks CAP_FSETID; the
+	 * filesystem's own privileges do not matter. The filesystem then
+	 * has to remove setuid/setgid bits.
+	 */
+	uint32_t kill_suidgid : 1;
+
+	/**
+	 * Can be filled in by open, to indicate that the file has no
+	 * position. Implies 'nonseekable'. Needs direct_io, see
+	 * <libfuse>/doc/README.stream.
+	 */
+	uint32_t stream : 1;
+
 	/** Padding.  Reserved for future use*/
-	uint32_t padding : 23;
+	uint32_t padding : 21;
 	uint32_t padding2 : 32;
 	uint32_t padding3 : 32;
 
@@ -272,11 +290,21 @@ struct fuse_loop_config_v1 {
  * request. If the new mtime differs from the previous value, any
  * cached file *contents* will be invalidated as well.
  *
- * This flag should always be set when available. If all file changes
- * go through the kernel, *attr_timeout* should be set to a very large
- * number to avoid unnecessary getattr() calls.
+ * This flag should be set with care. The kernel also invalidates the cache
+ * after its own write-through writes, and a read racing with such a write
+ * can cache data the server has not received yet.
+ * https://lore.kernel.org/r/20251009110623.3115511-1-giveme.gulu@gmail.com
  *
- * This feature is enabled by default when supported by the kernel.
+ * To see changes made outside the kernel without this flag, set
+ * fi->direct_io in open(), or call fuse_lowlevel_notify_inval_inode() when
+ * the backing data changes. Without fi->keep_cache, the cache is also
+ * dropped on every open.
+ *
+ * If all file changes go through the kernel, *attr_timeout* should be set
+ * to a very large number to avoid unnecessary getattr() calls.
+ *
+ * This flag was enabled by default in libfuse3, but is disabled by default
+ * again for FUSE_USE_VERSION >= 319.
  */
 #define FUSE_CAP_AUTO_INVAL_DATA (1UL << 12)
 
@@ -518,6 +546,32 @@ struct fuse_loop_config_v1 {
 #define FUSE_CAP_ALLOW_IDMAP (1ULL << 32)
 
 /**
+ * Indicates support for sending security context to file creation operations
+ * (FUSE_CREATE, FUSE_MKNOD, FUSE_MKDIR, FUSE_SYMLINK)
+ *
+ * When this feature is enabled, the kernel will send security context
+ * information in the extension area of create requests, allowing the
+ * filesystem to set SELinux/LSM labels atomically during file creation.
+ *
+ * This feature is enabled by default when supported by the kernel.
+ */
+#define FUSE_CAP_SECURITY_CTX (1ULL << 33)
+
+/**
+ * Indicates support for io-uring payload buffer pools
+ *
+ * Without this, every io-uring ring entry registers a payload buffer of its
+ * own and owns it for the lifetime of the ring. With it, a queue hands the
+ * kernel one contiguous pool of memory and the kernel assigns regions out of
+ * that pool for requests, allowing the kernel to manage/optimize memory usage
+ * for the queue. The pool is also registered as an io_uring fixed buffer
+ * where possible.
+ *
+ * This feature is disabled by default.
+ */
+#define FUSE_CAP_IO_URING_BUFPOOL (1ULL << 34)
+
+/**
  * Ioctl flags
  *
  * FUSE_IOCTL_COMPAT: 32bit compat ioctl on 64bit machine
@@ -557,7 +611,12 @@ struct fuse_conn_info {
 	uint32_t proto_minor;
 
 	/**
-	 * Maximum size of the write buffer
+	 * Maximum size of write requests. Initialized with the
+	 * maximum size libfuse supports.
+	 *
+	 * This value must be at least as big as the system page size
+	 * (getpagesize()) and for best performance it is recommended
+	 * to use an integer multiple of the page size.
 	 */
 	uint32_t max_write;
 
@@ -566,6 +625,11 @@ struct fuse_conn_info {
 	 * limit. However, even if the filesystem does not specify a
 	 * limit, the maximum size of read requests will still be
 	 * limited by the kernel.
+	 *
+	 * If set to a non-zero value, it must be at least as big as
+	 * the system page size (getpagesize()) and for best
+	 * performance it is recommended to use an integer multiple of
+	 * the page size.
 	 *
 	 * NOTE: For the time being, the maximum size of read requests
 	 * must be set both here *and* passed to fuse_session_new()
@@ -686,8 +750,19 @@ struct fuse_conn_info {
 	 */
 	uint32_t no_interrupt : 1;
 
+	/**
+	 * Only meaningful with io-uring (FUSE_CAP_OVER_IO_URING).
+
+	 * The filesystem promises that every reply to an io-uring request is
+	 * sent from the same thread that received the request (the per-queue
+	 * io-uring worker), i.e. replies are never deferred to another thread.
+	 * The flag is used for io-uring optimizations.
+	 *
+	 */
+	uint32_t io_uring_single_issuer : 1;
+
 	/* reserved bits for future use */
-	uint32_t padding : 31;
+	uint32_t padding : 30;
 
 	/**
 	 * Extended capability flags that the kernel supports (read-only)
@@ -967,7 +1042,10 @@ struct libfuse_version
 	uint32_t major;
 	uint32_t minor;
 	uint32_t hotfix;
-	uint32_t padding;
+	union {
+		uint32_t api_version;
+		uint32_t padding;
+	};
 };
 
 /* Initialize bufvec with a single buffer of given size */
@@ -1093,7 +1171,7 @@ void fuse_loop_cfg_set_clone_fd(struct fuse_loop_config *config,
 				unsigned int value);
 
 /**
- * Convert old config to more recernt fuse_loop_config2
+ * Convert old config to more recent fuse_loop_config2
  *
  * @param config current config2 type
  * @param v1_conf older config1 type (below FUSE API 312)
@@ -1120,7 +1198,7 @@ bool fuse_set_feature_flag(struct fuse_conn_info *conn, uint64_t flag);
 void fuse_unset_feature_flag(struct fuse_conn_info *conn, uint64_t flag);
 
 /**
- * Get the value of a feature flag in the want_ext field of fuse_conn_info.
+ * Get the value of a feature flag in the capable_ext field of fuse_conn_info.
  *
  * @param conn connection information
  * @param flag feature flag to be checked
@@ -1128,9 +1206,28 @@ void fuse_unset_feature_flag(struct fuse_conn_info *conn, uint64_t flag);
  */
 bool fuse_get_feature_flag(const struct fuse_conn_info *conn, uint64_t flag);
 
+/**
+ * FUSE_CONN_FLAG_SINGLE_ISSUER: Reply from the same thread that received
+ *                               requests, which allows io-uring optimizations
+ * FUSE_CONN_FLAG_NO_INTERRUPT: Disable fuse interrupt handling and (libfuse overhead)
+ */
+#define FUSE_CONN_FLAG_SINGLE_ISSUER (1u << 0)
+#define FUSE_CONN_FLAG_NO_INTERRUPT (1u << 1)
+
+/**
+ * Set a libfuse connection flag (a FUSE_CONN_FLAG_* value). Unlike
+ * fuse_set_feature_flag(), these are libfuse-side hints, not negotiated
+ * with the kernel.
+ *
+ * @param conn connection information
+ * @param flag a single FUSE_CONN_FLAG_* value
+ * @return true if the flag is known to this libfuse and was set, false otherwise
+ */
+bool fuse_set_conn_flag(struct fuse_conn_info *conn, uint64_t flag);
+
 /*
  * DO NOT USE: Not part of public API, for internal test use only.
- * The function signature or any use of it is not guaranteeed to
+ * The function signature or any use of it is not guaranteed to
  * remain stable. And neither are results of what this function does.
  */
 int fuse_convert_to_conn_want_ext(struct fuse_conn_info *conn);
