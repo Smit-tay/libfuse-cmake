@@ -1,68 +1,58 @@
-# CMake equivalent of libfuse's meson.build
-# Every attempt has been made to match all the functionality provided by meson
-# Use at your own risk
+# CMake equivalent of util/meson.build
 
-cmake_minimum_required (VERSION 3.12.0)
-set (CMAKE_VERBOSE_MAKEFILE FALSE)
+# meson: join_paths(get_option('prefix'), get_option('sysconfdir'), 'fuse.conf')
+set(fuseconf_path "${CMAKE_INSTALL_FULL_SYSCONFDIR}/fuse.conf")
 
-include(GNUInstallDirs)
+add_executable(fusermount3
+    fusermount.c ../lib/mount_util.c ../lib/mount_fsmount.c
+    ../lib/fuse_log.c ../lib/util.c fuser_conf.c)
+target_include_directories(fusermount3 PRIVATE ${INCLUDE_DIRS})
+target_compile_definitions(fusermount3 PRIVATE FUSE_CONF="${fuseconf_path}")
 
-set(MESON_SOURCE_ROOT ${CMAKE_PROJECT_SOURCE_DIR})
-set(FUSECONF_PATH ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/fuse.conf)
+set(mount_service_sources)
+set(mount_service_cflags)
+if(HAVE_SERVICEMOUNT)
+    list(APPEND mount_service_sources mount_service.c ../lib/mount_util.c fuser_conf.c)
+    if(HAVE_NEW_MOUNT_API)
+        list(APPEND mount_service_sources ../lib/mount_fsmount.c)
+    endif()
+    list(APPEND mount_service_cflags
+         FUSE_CONF="${fuseconf_path}"
+         FUSERVICEMOUNT_DIR="${CMAKE_INSTALL_FULL_SBINDIR}")
 
-# meson equiv
-#executable('fusermount3', ['fusermount.c', '../lib/mount_util.c'],
-#           include_directories: include_dirs,
-#           install: true,
-#           install_dir: get_option('bindir'),
-#           c_args: '-DFUSE_CONF="@0@"'.format(fuseconf_path))
-add_executable(fusermount3 fusermount.c ../lib/mount_util.c ../lib/mount_fsmount.c ../lib/util.c)
+    add_executable(fuservicemount3 fuservicemount.c ${mount_service_sources})
+    target_include_directories(fuservicemount3 PRIVATE ${INCLUDE_DIRS})
+    target_link_libraries(fuservicemount3 PRIVATE fuse3)
+    target_compile_definitions(fuservicemount3 PRIVATE
+                               FUSE_USE_VERSION=319 ${mount_service_cflags})
+    # A setuid run ignores $ORIGIN; CMake's build RPATH is already absolute.
+endif()
 
-target_include_directories(fusermount3
-                           PUBLIC ${INCLUDE_DIRS})
-target_compile_definitions(fusermount3
-                           PUBLIC FUSE_CONF=\"${FUSECONF_PATH}\")
+add_executable(mount.fuse3 mount.fuse.c ${mount_service_sources})
+target_include_directories(mount.fuse3 PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(mount.fuse3 PRIVATE fuse3)
+target_compile_definitions(mount.fuse3 PRIVATE
+                           FUSE_USE_VERSION=319 ${mount_service_cflags})
+
+#
+# Installation. Known to be incomplete/incorrect (see the review); to be
+# reworked separately.
+#
 install(TARGETS fusermount3 RUNTIME
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ)
-
-# meson equiv
-#executable('mount.fuse3', ['mount.fuse.c'],
-#           include_directories: include_dirs,
-#           link_with: [ libfuse ],
-#           install: true,
-#           install_dir: get_option('sbindir'),
-#           c_args: '-DFUSE_USE_VERSION=312')
-
-add_executable(mount.fuse3 mount.fuse.c )
-
-target_include_directories(mount.fuse3
-                           PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(mount.fuse3 fuse3)
-
-target_compile_definitions(mount.fuse3
-                           PUBLIC FUSE_USE_VERSION=317)
 install(TARGETS mount.fuse3 RUNTIME
         DESTINATION ${CMAKE_INSTALL_SBINDIR})
+if(HAVE_SERVICEMOUNT)
+    install(TARGETS fuservicemount3 RUNTIME
+            DESTINATION ${CMAKE_INSTALL_SBINDIR})
+endif()
 
-# meson equiv
-#udevrulesdir = get_option('udevrulesdir')
-#if udevrulesdir == ''
-#  udev = dependency('udev')
-#  udevrulesdir = join_paths(udev.get_pkgconfig_variable('udevdir'), 'rules.d')
-#endif
-option(UDEV_RULES_DIR
-       "Target directory for udev rule installation. Ensure you have permissions to write to this directory."
-       "/etc/udev/rules.d"
-)
+set(UDEV_RULES_DIR "/etc/udev/rules.d" CACHE PATH
+    "Target directory for udev rule installation (meson: udevrulesdir)")
 
-# meson equiv
-#meson.add_install_script('install_helper.sh',
-#                         join_paths(get_option('prefix'), get_option('sysconfdir')),
-#                         join_paths(get_option('prefix'), get_option('bindir')),
-#                         udevrulesdir)
-install(CODE "execute_process(COMMAND MESON_SOURCE_ROOT=${MESON_SOURCE_ROOT} ${CMAKE_CURRENT_SOURCE_DIR}/install_helper.sh
-                             ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}
-                             ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}
+install(CODE "execute_process(COMMAND MESON_SOURCE_ROOT=${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/install_helper.sh
+                             ${CMAKE_INSTALL_FULL_SYSCONFDIR}
+                             ${CMAKE_INSTALL_FULL_BINDIR}
                              ${UDEV_RULES_DIR})"
 )

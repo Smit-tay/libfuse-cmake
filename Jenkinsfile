@@ -57,7 +57,7 @@ pipeline {
                    cd build
                    sudo /usr/bin/chown-jenkins root:root util/fusermount3
                    sudo /usr/bin/chmod-jenkins 4755 util/fusermount3
-                   pytest test/
+                   ../test/run-tests.py --build-dir .
                    '''
             }
         }

@@ -1,139 +1,115 @@
-# CMake equivalent of libfuse's meson.build
-# Every attempt has been made to match all the functionality provided by meson
-# Use at your own risk
+# CMake equivalent of test/meson.build
 
-cmake_minimum_required (VERSION 3.21.0)
-set (CMAKE_VERBOSE_MAKEFILE FALSE)
+# Compile helper programs.
+#
+# CMake target names are global, and example/ already has `hello` and
+# `hello_ll`, so test programs are given a test_* target name where needed
+# and OUTPUT_NAME restores the file name run-tests.py looks for in
+# <build>/test.
+set(test_targets)
 
-if( DEFINED NDEBUG )
-    message(WARNING "NDEBUG is defined, you will almost definitely experience problems")
-endif()
-
-## Suppress noise common in test scaffolding. FUSE callback signatures,
-# unused thread-helper functions when a test only exercises some paths,
-# and option_spec[] structures referenced only when arguments are parsed -
-# all show up as unused-* warnings under -Wall -Wextra. They're not
-# defects; they're shape-of-the-API. Uninitialized warnings are kept
-# (they catch real bugs).
-add_compile_options(
-    -Wno-unused-parameter
-    -Wno-unused-variable
-    -Wno-unused-function
-    -Wno-unused-but-set-variable
-    -Wno-unused-const-variable)
-
-# The example/ subdirectory also builds an executable named `hello` (the
-# canonical libfuse example). CMake target names are global, so we use a
-# distinct CMake target name here and rely on OUTPUT_NAME to keep the
-# on-disk binary called `hello` - the pytest harness expects that filename
-# in the test build directory.
-add_executable(test_hello)
-set_target_properties(test_hello PROPERTIES OUTPUT_NAME hello)
-target_sources(test_hello PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/hello.c)
-target_include_directories(test_hello PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_hello fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable( test_setattr)
-target_sources( test_setattr PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_setattr.c )
-target_include_directories(test_setattr PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_setattr fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable( test_write_cache)
-target_sources( test_write_cache PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_write_cache.c )
-target_include_directories(test_write_cache PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_write_cache fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(test_syscalls)
-target_sources(test_syscalls PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_syscalls.c)
-target_include_directories(test_syscalls PUBLIC ${INCLUDE_DIRS})
-# Intentionally NOT linked against fuse3 or pthreads: test_syscalls exercises
-# kernel syscalls directly and must not pull in libfuse. Matches meson.build,
-# which uses only include_directories for this target.
-#target_link_libraries(test_syscalls fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(readdir_inode)
-target_sources(readdir_inode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/readdir_inode.c)
-target_include_directories(readdir_inode PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(readdir_inode fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(release_unlink_race)
-target_sources(release_unlink_race PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/release_unlink_race.c)
-target_include_directories(release_unlink_race PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(release_unlink_race fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(test_want_conversion)
-target_sources(test_want_conversion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_want_conversion.c)
-target_include_directories(test_want_conversion PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_want_conversion fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(test_signals)
-target_sources(test_signals PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_signals.c)
-target_include_directories(test_signals PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_signals fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(test_teardown_watchdog)
-target_sources(test_teardown_watchdog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_teardown_watchdog.c)
-target_include_directories(test_teardown_watchdog PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_teardown_watchdog fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(test_abi)
-target_sources(test_abi PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_abi.c)
-target_include_directories(test_abi PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_abi fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-add_executable(test_loop_config)
-target_sources(test_loop_config PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/test_loop_config.c)
-target_include_directories(test_loop_config PUBLIC ${INCLUDE_DIRS})
-target_link_libraries(test_loop_config fuse3 ${CMAKE_THREAD_LIBS_INIT})
-
-# Collect all test executables for the pytest dependency below.
-# Note: test_hello is the CMake target name; OUTPUT_NAME makes the on-disk
-# binary `hello` (see add_executable above).
-set(TEST_EXECUTABLES
-    test_hello test_setattr test_write_cache test_syscalls readdir_inode
-    release_unlink_race test_want_conversion test_signals
-    test_teardown_watchdog test_abi test_loop_config)
-
-set(TEST_SCRIPTS conftest.py pytest.ini test_examples.py util.py
-                 test_ctests.py test_custom_io.py test_mount_state.py)
-
-add_custom_target(test_scripts ALL)
-foreach(TEST_SCRIPT ${TEST_SCRIPTS})
-  add_custom_command(TARGET test_scripts PRE_BUILD
-                     COMMAND ${CMAKE_COMMAND} -E
-                         copy ${CMAKE_CURRENT_SOURCE_DIR}/${TEST_SCRIPT} ${CMAKE_CURRENT_BINARY_DIR}/.)
+# meson: include_directories + link_with: [ libfuse ] + thread_dep
+foreach(prog test_write_cache test_setattr test_api_30 hello hello_ll)
+    if(prog MATCHES "^test_")
+        set(tgt ${prog})
+    else()
+        set(tgt test_${prog})
+    endif()
+    add_executable(${tgt} ${prog}.c)
+    set_target_properties(${tgt} PROPERTIES OUTPUT_NAME ${prog})
+    target_include_directories(${tgt} PRIVATE ${INCLUDE_DIRS})
+    target_link_libraries(${tgt} PRIVATE fuse3 Threads::Threads)
+    list(APPEND test_targets ${tgt})
 endforeach()
 
-if(NOT PROJECT_IS_TOP_LEVEL)
-    # libfuse is being consumed as a subproject; skip the real test suite.
-    # Mirrors meson.is_subproject() branch which builds wrong_command with
-    # -DMESON_IS_SUBPROJECT and registers it as the only test.
-    add_executable(wrong_command ${CMAKE_CURRENT_SOURCE_DIR}/wrong_command.c)
-    target_compile_definitions(wrong_command PRIVATE MESON_IS_SUBPROJECT)
-    add_test(NAME "libfuse is a subproject, skipping tests"
-             COMMAND wrong_command)
-else()
-    find_program(PYTEST_EXECUTABLE pytest)
-    if(PYTEST_EXECUTABLE)
-        add_test(NAME pytest
-                 COMMAND ${PYTEST_EXECUTABLE}
-                         -vv --tb=short --maxfail=1
-                         --log-level=INFO --log-cli-level=INFO
-                         ${CMAKE_CURRENT_BINARY_DIR}
-                 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
-        set_tests_properties(pytest PROPERTIES
-                             TIMEOUT 600
-                             RUN_SERIAL TRUE)
-    else()
-        # Match meson's fallback: build wrong_command and register it so the
-        # test suite reports a clear failure when pytest is missing.
-        add_executable(wrong_command ${CMAKE_CURRENT_SOURCE_DIR}/wrong_command.c)
-        add_test(NAME "pytest not found" COMMAND wrong_command)
-    endif()
+# meson: include_directories only, not linked with libfuse
+foreach(prog test_syscalls readdir_inode)
+    add_executable(${prog} ${prog}.c)
+    target_include_directories(${prog} PRIVATE ${INCLUDE_DIRS})
+    list(APPEND test_targets ${prog})
+endforeach()
+
+# meson: dependencies: [ libfuse_dep ] (and thread_dep, which fuse3 carries)
+foreach(prog release_unlink_race passthrough-hl test_want_conversion
+             test_signals test_teardown_watchdog test_deferred_reply_teardown
+             test_abi test_secctx_splice test_stream test_loop_config)
+    add_executable(${prog} ${prog}.c)
+    target_include_directories(${prog} PRIVATE ${INCLUDE_DIRS})
+    target_link_libraries(${prog} PRIVATE fuse3)
+    list(APPEND test_targets ${prog})
+endforeach()
+
+add_executable(test_mount_flags
+               test_mount_flags.c ../lib/mount_util.c ../lib/fuse_log.c)
+target_include_directories(test_mount_flags PRIVATE ${INCLUDE_DIRS})
+list(APPEND test_targets test_mount_flags)
+
+# fuser_conf.h needs <sys/vfs.h>, so this follows util/ rather than being built
+# everywhere.
+# FUSE_CONF is relative here so the test can chdir to a directory of its own
+# and have read_conf() pick up the file it just wrote there.
+if(build_utils)
+    add_executable(test_fuser_conf
+                   test_fuser_conf.c ../util/fuser_conf.c
+                   ../lib/mount_util.c ../lib/fuse_log.c ../lib/util.c)
+    target_include_directories(test_fuser_conf PRIVATE
+                               ${INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/util)
+    target_compile_definitions(test_fuser_conf PRIVATE FUSE_CONF="fuse.conf")
+    list(APPEND test_targets test_fuser_conf)
 endif()
 
-# `make check` (or `ninja check`) — build everything, then run ctest.
-# Closest ergonomic match to `meson test -C build`, which builds-then-tests.
+if(HAVE_SERVICEMOUNT)
+    add_executable(test_service test_service.c)
+    target_include_directories(test_service PRIVATE ${INCLUDE_DIRS})
+    target_link_libraries(test_service PRIVATE fuse3)
+    list(APPEND test_targets test_service)
+endif()
+
+if(NOT PROJECT_IS_TOP_LEVEL)
+    # Skipped rather than run: the tests mount filesystems, which is not
+    # something a parent project's ctest should do. Exit 77 is SKIP.
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        add_test(NAME "libfuse is a subproject, skipping tests"
+                 COMMAND ${Python3_EXECUTABLE} -c
+                         "import sys; print('run them with test/run-tests.py --build-dir <builddir>', file=sys.stderr); sys.exit(77)")
+        set_tests_properties("libfuse is a subproject, skipping tests"
+                             PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+else()
+    # The same definition works both as a regular user and under sudo:
+    # `ctest` for the unprivileged subset, or `sudo -E ctest` to also exercise
+    # the tests that require root (they pick the uid up at runtime).
+    #
+    # Nothing is copied into the build tree: the runner, its library and the
+    # test scripts are read from the source dir, and the only build artefacts
+    # a test needs are the binaries, which it reaches through --build-dir.
+    #
+    # No --run-dir: it defaults under /var/tmp/fuse-tests, and CI redirects
+    # it with $FUSE_TEST_RUN_DIR so the logs outlive the build tree.
+    set(runner ${CMAKE_CURRENT_SOURCE_DIR}/run-tests.py)
+    add_test(NAME fuse-tests
+             COMMAND ${runner} --build-dir ${PROJECT_BINARY_DIR})
+
+    # The same tests over the other transport, labelled so a caller can ask
+    # for exactly one of the two: `ctest -L io-uring` and `ctest -LE io-uring`.
+    # It exits 77 -- ctest reports it as skipped -- where the fuse module has
+    # io-uring disabled.
+    add_test(NAME fuse-tests-io-uring
+             COMMAND ${runner} --build-dir ${PROJECT_BINARY_DIR} --io-uring)
+
+    # RUN_SERIAL: the runner does its own -j
+    set_tests_properties(fuse-tests fuse-tests-io-uring PROPERTIES
+                         TIMEOUT 1800
+                         RUN_SERIAL TRUE
+                         SKIP_RETURN_CODE 77)
+    set_tests_properties(fuse-tests-io-uring PROPERTIES LABELS io-uring)
+endif()
+
+# `make check` / `ninja check`: build what the tests need, then run ctest.
+# Closest match to `meson test`, which builds the test's `depends:` first.
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS ${TEST_EXECUTABLES} test_scripts)
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    USES_TERMINAL)
+add_dependencies(check ${test_targets})

@@ -9,7 +9,7 @@ make
 sudo chown root:root util/fusermount3
 sudo chmod 4755 util/fusermount3
 
-pytest -v --maxfail=1 --log-level=DEBUG --log-cli-level=DEBUG test/
+"${SOURCE_DIR}/test/run-tests.py" --build-dir .
 
 
 
