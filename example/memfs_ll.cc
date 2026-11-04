@@ -255,9 +255,9 @@ class Inode {
 	void truncate(off_t size)
 	{
 		std::lock_guard<std::mutex> attr_lock(mutex);
-		if (size < content.size()) {
+		if (static_cast<uint64_t>(size) < content.size()) {
 			content.resize(size);
-		} else if (size > content.size()) {
+		} else if (static_cast<uint64_t>(size) > content.size()) {
 			content.resize(size, 0);
 		}
 		mtime = time(NULL);
@@ -724,7 +724,7 @@ static void memfs_read(fuse_req_t req, fuse_ino_t ino, size_t size,
 
 	inode->lock();
 
-	if (offset >= inode->content_size()) {
+	if (static_cast<uint64_t>(offset) >= inode->content_size()) {
 		fuse_reply_buf(req, nullptr, 0);
 		inode->unlock();
 		return;
@@ -1230,32 +1230,39 @@ static void memfs_statfs(fuse_req_t req, [[maybe_unused]] fuse_ino_t ino)
 	fuse_reply_statfs(req, &stbuf);
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-static const struct fuse_lowlevel_ops memfs_oper = {
-	.init = memfs_init,
-	.lookup = memfs_lookup,
-	.forget = memfs_forget,
-	.getattr = memfs_getattr,
-	.setattr = memfs_setattr,
-	.mknod = memfs_mknod,
-	.mkdir = memfs_mkdir,
-	.unlink = memfs_unlink,
-	.rmdir = memfs_rmdir,
-	.rename = memfs_rename,
-	.link = memfs_link,
-	.open = memfs_open,
-	.read = memfs_read,
-	.write = memfs_write,
-	.release = memfs_release,
-	.opendir = memfs_opendir,
-	.readdir = memfs_readdir,
-	.releasedir = memfs_releasedir,
-	.statfs = memfs_statfs,
-	.create = memfs_create,
-	.forget_multi = memfs_forget_multi,
-};
-#pragma GCC diagnostic pop
+/*
+ * Value-initialise, then assign: unlike C, C++ compilers warn about every
+ * member a designated initializer leaves out (-Wmissing-field-initializers).
+ */
+static fuse_lowlevel_ops make_memfs_oper()
+{
+	fuse_lowlevel_ops ops{};
+
+	ops.init = memfs_init;
+	ops.lookup = memfs_lookup;
+	ops.forget = memfs_forget;
+	ops.getattr = memfs_getattr;
+	ops.setattr = memfs_setattr;
+	ops.mknod = memfs_mknod;
+	ops.mkdir = memfs_mkdir;
+	ops.unlink = memfs_unlink;
+	ops.rmdir = memfs_rmdir;
+	ops.rename = memfs_rename;
+	ops.link = memfs_link;
+	ops.open = memfs_open;
+	ops.read = memfs_read;
+	ops.write = memfs_write;
+	ops.release = memfs_release;
+	ops.opendir = memfs_opendir;
+	ops.readdir = memfs_readdir;
+	ops.releasedir = memfs_releasedir;
+	ops.statfs = memfs_statfs;
+	ops.create = memfs_create;
+	ops.forget_multi = memfs_forget_multi;
+	return ops;
+}
+
+static const struct fuse_lowlevel_ops memfs_oper = make_memfs_oper();
 
 int main(int argc, char *argv[])
 {

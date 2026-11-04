@@ -614,7 +614,7 @@ static int check_unlinked_testfile(int fd)
 static int check_unlinked_testfiles(void)
 {
 	int res, err = 0;
-	int num = testnum;
+	unsigned int num = testnum;
 
 	if (!unlinked_test)
 		return 0;
@@ -834,7 +834,7 @@ static int test_seekdir(void)
 	}
 
 	/* Remember dir offsets */
-	for (i = 0; i < ARRAY_SIZE(seekdir_offsets); i++) {
+	for (i = 0; i < (int)ARRAY_SIZE(seekdir_offsets); i++) {
 		seekdir_offsets[i] = telldir(dp);
 		errno = 0;
 		de = readdir(dp);

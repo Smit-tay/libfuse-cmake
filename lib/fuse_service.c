@@ -99,7 +99,7 @@ static int __recv_fd(const struct fuse_service *sf,
 		return -error;
 	}
 	if (size > bufsize ||
-	    size < offsetof(struct fuse_service_requested_file, path)) {
+	    (size_t)size < offsetof(struct fuse_service_requested_file, path)) {
 		fuse_log(FUSE_LOG_ERR, "fuse: wrong service file reply size %zd, expected %zd\n",
 			 size, bufsize);
 		return -EBADMSG;
@@ -381,7 +381,7 @@ static int check_sendbuf_size(int sockfd)
 	if (ret || sendbuf_size < 0)
 		return 0;
 
-	if (sendbuf_size >= min_size)
+	if ((size_t)sendbuf_size >= min_size)
 		return 0;
 
 	fuse_log(FUSE_LOG_ERR, "max socket send buffer is %d, need at least %zu.\n",
@@ -646,7 +646,7 @@ int fuse_service_append_args(struct fuse_service *sf,
 			 strerror(error));
 		return -error;
 	}
-	if (received < sizeof(memfd_args)) {
+	if ((size_t)received < sizeof(memfd_args)) {
 		fuse_log(FUSE_LOG_ERR, "fuse: service args file length unreadable\n");
 		return -EBADMSG;
 	}
@@ -703,7 +703,7 @@ int fuse_service_append_args(struct fuse_service *sf,
 	 * that the mount helper sent us.
 	 */
 	new_args.argc++;
-	for (i = 1; i < existing_args->argc; i++) {
+	for (i = 1; i < (unsigned int)existing_args->argc; i++) {
 		if (existing_args->allocated) {
 			new_args.argv[new_args.argc] = existing_args->argv[i];
 			existing_args->argv[i] = NULL;
@@ -741,7 +741,7 @@ int fuse_service_append_args(struct fuse_service *sf,
 			ret = -error;
 			goto out_new_args;
 		}
-		if (received < sizeof(struct fuse_service_memfd_arg)) {
+		if ((size_t)received < sizeof(struct fuse_service_memfd_arg)) {
 			fuse_log(FUSE_LOG_ERR,
 				 "fuse: service args file argv[%u] iovec short read %zd",
 				 i, received);
@@ -1204,7 +1204,7 @@ char *fuse_service_cmdline(int argc, const char * const *argv,
 	size_t len = 1;
 	ssize_t ret;
 	const char *argv0;
-	unsigned int i;
+	int i;
 
 	/* Try to preserve argv[0] */
 	if (argc > 0)

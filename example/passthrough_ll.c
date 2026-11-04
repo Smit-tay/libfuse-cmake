@@ -206,7 +206,7 @@ static void lo_getattr(fuse_req_t req, fuse_ino_t ino,
 	int res;
 	struct stat buf;
 	struct lo_data *lo = lo_data(req);
-	int fd = fi ? fi->fh : lo_fd(req, ino);
+	int fd = fi ? (int)fi->fh : lo_fd(req, ino);
 
 	(void) fi;
 
@@ -594,7 +594,7 @@ static void lo_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup)
 static void lo_forget_multi(fuse_req_t req, size_t count,
 				struct fuse_forget_data *forgets)
 {
-	int i;
+	size_t i;
 
 	for (i = 0; i < count; i++)
 		lo_forget_one(req, forgets[i].ino, forgets[i].nlookup);

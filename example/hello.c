@@ -124,7 +124,7 @@ static int hello_read(const char *path, char *buf, size_t size, off_t offset,
 		return -ENOENT;
 
 	len = strlen(options.contents);
-	if (offset < len) {
+	if ((uint64_t)offset < len) {
 		if (offset + size > len)
 			size = len - offset;
 		memcpy(buf, options.contents + offset, size);

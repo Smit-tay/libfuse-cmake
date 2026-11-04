@@ -149,7 +149,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	(void) offset;
 	pthread_mutex_lock(&lock);
 	if (strcmp(path, "/" TIME_FILE_NAME) == 0) {
-		int file_length = strlen(time_file_contents);
+		size_t file_length = strlen(time_file_contents);
 		to_copy = offset + size <= file_length
 				? size
 						: file_length - offset;

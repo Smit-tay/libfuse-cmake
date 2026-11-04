@@ -238,7 +238,7 @@ static void test_fs(const char *mountpoint)
 	assert(buf != NULL);
 	fd = open("/dev/urandom", O_RDONLY);
 	assert(fd != -1);
-	assert(read(fd, buf, dsize) == dsize);
+	assert(read(fd, buf, dsize) == (ssize_t)dsize);
 	close(fd);
 
 	assert(snprintf(fname, PATH_MAX, "%s/" FILE_NAME, mountpoint) > 0);
@@ -258,9 +258,9 @@ static void test_fs(const char *mountpoint)
 	}
 
 	for (int cnt = 0; cnt < WRITE_SYSCALLS; cnt++) {
-		assert(pwrite(fd, buf + off, iosize, off) == iosize);
+		assert(pwrite(fd, buf + off, iosize, off) == (ssize_t)iosize);
 		off += iosize;
-		assert(off <= dsize);
+		assert((uint64_t)off <= dsize);
 	}
 	free(buf);
 	close(fd);

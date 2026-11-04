@@ -146,7 +146,7 @@ static ssize_t fuse_buf_fd_to_fd(const struct fuse_buf *dst, size_t dst_off,
 
 		copied += res;
 
-		if (res < this_len)
+		if ((size_t)res < this_len)
 			break;
 
 		dst_off += res;
@@ -315,7 +315,7 @@ ssize_t fuse_buf_copy(struct fuse_bufvec *dstv, struct fuse_bufvec *srcv,
 		    !fuse_bufvec_advance(dstv, res))
 			break;
 
-		if (res < len)
+		if ((size_t)res < len)
 			break;
 	}
 

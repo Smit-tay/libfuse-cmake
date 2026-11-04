@@ -138,7 +138,7 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name,
 static int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
 			     off_t off, size_t maxsize)
 {
-	if (off < bufsize)
+	if ((uint64_t)off < bufsize)
 		return fuse_reply_buf(req, buf + off,
 				      min(bufsize - off, maxsize));
 	else
@@ -251,7 +251,7 @@ static ssize_t stream_writev(int fd, struct iovec *iov, int count,
 		if (written < 0)
 			return written;
 
-		while (cur < count && written >= iov[cur].iov_len)
+		while (cur < count && (size_t)written >= iov[cur].iov_len)
 			written -= iov[cur++].iov_len;
 		if (cur == count)
 			break;

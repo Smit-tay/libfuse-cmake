@@ -557,7 +557,7 @@ int fuse_mnt_parse_fuse_fd(const char *mountpoint)
 	}
 
 	if (sscanf(mountpoint, "/dev/fd/%u%n", &fd, &len) == 1 &&
-	    len == strlen(mountpoint)) {
+	    (size_t)len == strlen(mountpoint)) {
 		if (fd > INT_MAX) {
 			fuse_log(FUSE_LOG_ERR, "%s: fd=%u > INT_MAX\n", __func__, fd);
 			return -1;

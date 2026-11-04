@@ -233,7 +233,8 @@ static void *fsel_producer(void *data)
 	(void) data;
 
 	while (!fsel_stop) {
-		int i, t;
+		unsigned i;
+		int t;
 
 		pthread_mutex_lock(&fsel_mutex);
 

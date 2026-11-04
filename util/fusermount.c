@@ -626,7 +626,7 @@ static int opt_eq(const char *s, unsigned len, const char *opt)
 static int get_string_opt(const char *s, unsigned len, const char *opt,
 			  char **val)
 {
-	int i;
+	unsigned i;
 	unsigned opt_len = strlen(opt);
 	char *d;
 
@@ -658,7 +658,7 @@ static int get_string_opt(const char *s, unsigned len, const char *opt,
 static int mount_notrunc(const char *source, const char *target,
 			 const char *filesystemtype, unsigned long mountflags,
 			 const char *data) {
-	if (strlen(data) > sysconf(_SC_PAGESIZE) - 1) {
+	if (strlen(data) > (size_t)(sysconf(_SC_PAGESIZE) - 1)) {
 		fprintf(stderr, "%s: mount options too long\n", progname);
 		errno = EINVAL;
 		return -1;

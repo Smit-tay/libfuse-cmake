@@ -305,7 +305,7 @@ static int check_sendbuf_size(const struct mount_service *mo, int sockfd)
 	if (ret || sendbuf_size < 0)
 		return 0;
 
-	if (sendbuf_size >= min_size)
+	if ((size_t)sendbuf_size >= min_size)
 		return 0;
 
 	fprintf(stderr, "%s: max socket send buffer is %d, need at least %zu.\n",
@@ -324,7 +324,7 @@ static int mount_service_connect(struct mount_service *mo)
 
 	written = snprintf(name.sun_path, sizeof(name.sun_path),
 			FUSE_SERVICE_SOCKET_DIR "/%s", mo->subtype);
-	if (written >= sizeof(name.sun_path)) {
+	if ((size_t)written >= sizeof(name.sun_path)) {
 		fprintf(stderr, "%s: filesystem type name `%s' is too long.\n",
 			mo->msgtag, mo->subtype);
 		return -1;
@@ -458,7 +458,7 @@ static int mount_service_capture_arg(const struct mount_service *mo,
 			mo->msgtag, strerror(errno));
 		return -1;
 	}
-	if (written < string_len) {
+	if ((size_t)written < string_len) {
 		fprintf(stderr, "%s: memfd argv[%u] wrote %zd, expected %zu\n",
 			mo->msgtag, args->argc, written, string_len);
 		return -1;
@@ -470,7 +470,7 @@ static int mount_service_capture_arg(const struct mount_service *mo,
 			mo->msgtag, strerror(errno));
 		return -1;
 	}
-	if (written < sizeof(arg)) {
+	if ((size_t)written < sizeof(arg)) {
 		fprintf(stderr, "%s: memfd arg[%u] wrote %zd, expected %zu\n",
 			mo->msgtag, args->argc, written, sizeof(arg));
 		return -1;
@@ -545,7 +545,7 @@ static int mount_service_capture_args(struct mount_service *mo, int argc,
 			mo->msgtag, strerror(errno));
 		return -1;
 	}
-	if (written < sizeof(args)) {
+	if ((size_t)written < sizeof(args)) {
 		fprintf(stderr, "%s: memfd argv wrote %zd, expected %zu\n",
 			mo->msgtag, written, sizeof(args));
 		return -1;
@@ -580,7 +580,7 @@ static int mount_service_send_file(const struct mount_service *mo,
 		ret = -1;
 		goto out_req;
 	}
-	if (written < req_sz) {
+	if ((size_t)written < req_sz) {
 		fprintf(stderr, "%s: send file reply wrote %zd, expected %zu\n",
 			mo->msgtag, written, req_sz);
 		ret = -1;
@@ -618,7 +618,7 @@ static int mount_service_send_file_error(const struct mount_service *mo,
 		ret = -1;
 		goto out_req;
 	}
-	if (written < req_sz) {
+	if ((size_t)written < req_sz) {
 		fprintf(stderr, "%s: send file error wrote %zd, expected %zu\n",
 			mo->msgtag, written, req_sz);
 		ret = -1;
@@ -682,7 +682,7 @@ static int mount_service_receive_command(const struct mount_service *mo,
 			mo->msgtag);
 		return -1;
 	}
-	if (alleged_size < sizeof(struct fuse_service_packet)) {
+	if ((size_t)alleged_size < sizeof(struct fuse_service_packet)) {
 		fprintf(stderr, "%s: wrong command packet size %zd, expected at least %zu\n",
 			mo->msgtag, alleged_size,
 			sizeof(struct fuse_service_packet));
@@ -1995,7 +1995,7 @@ bool mount_service_present(const char *fstype)
 	 */
 	written = snprintf(path, sizeof(path), FUSE_SERVICE_SOCKET_DIR "/%s",
 			   subtype);
-	if (written >= sizeof(name.sun_path) || written >= sizeof(path))
+	if ((size_t)written >= sizeof(name.sun_path) || (size_t)written >= sizeof(path))
 		return false;
 
 	ret = stat(path, &stbuf);

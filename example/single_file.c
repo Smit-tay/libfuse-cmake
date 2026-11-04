@@ -97,7 +97,7 @@ static void dirbuf_add(fuse_req_t req, struct dirbuf *b, const char *name,
 int reply_buf_limited(fuse_req_t req, const char *buf, size_t bufsize,
 		      off_t off, size_t maxsize)
 {
-	if (off < bufsize)
+	if ((uint64_t)off < bufsize)
 		return fuse_reply_buf(req, buf + off,
 				      min(bufsize - off, maxsize));
 	else
@@ -802,9 +802,9 @@ int single_file_check_write(off_t pos, size_t *count)
 	if (pos >= single_file.isize)
 		return -EFBIG;
 
-	if (*count > single_file.isize)
+	if (*count > (uint64_t)single_file.isize)
 		*count = single_file.isize;
-	if (pos >= single_file.isize - *count)
+	if ((uint64_t)pos >= (uint64_t)single_file.isize - *count)
 		*count = single_file.isize - pos;
 
 	return 0;
@@ -921,7 +921,7 @@ int single_file_configure(const char *device, const char *filename)
 
 	proposed_blocksize = single_file.blocksize ? single_file.blocksize :
 						     sysconf(_SC_PAGESIZE);
-	if (lbasize > proposed_blocksize) {
+	if ((unsigned int)lbasize > proposed_blocksize) {
 		fprintf(stderr, "%s: lba size %d smaller than blocksize %u\n",
 			device, lbasize, proposed_blocksize);
 		return -1;
@@ -934,7 +934,7 @@ int single_file_configure(const char *device, const char *filename)
 		return -1;
 	}
 
-	if (single_file.isize > backing_size) {
+	if ((unsigned long long)single_file.isize > backing_size) {
 		fprintf(stderr, "%s: file size %llu smaller than size param %llu\n",
 			device, backing_size,
 			(unsigned long long)single_file.isize);

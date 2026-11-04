@@ -870,7 +870,7 @@ static int read_back(int fd, char *buf, size_t len)
 			 strerror(errno));
 		return -EIO;
 	}
-	if (res != len) {
+	if ((size_t)res != len) {
 		fuse_log(FUSE_LOG_ERR,
 			 "fuse: internal error: short read back from pipe: %i from %zd\n",
 			 res, len);
@@ -985,7 +985,7 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 	if (res == -1)
 		goto fallback;
 
-	if (res != headerlen) {
+	if ((size_t)res != headerlen) {
 		res = -EIO;
 		fuse_log(FUSE_LOG_ERR, "fuse: short vmsplice to pipe: %u/%zu\n", res,
 			headerlen);
@@ -1020,7 +1020,7 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 		goto clear_pipe;
 	}
 
-	if (res != 0 && res < len) {
+	if (res != 0 && (size_t)res < len) {
 		struct fuse_bufvec mem_buf = FUSE_BUFVEC_INIT(len);
 		void *mbuf;
 		size_t now_len = res;
@@ -1104,7 +1104,7 @@ static int fuse_send_data_iov(struct fuse_session *se, struct fuse_chan *ch,
 		perror("fuse: splice from pipe");
 		goto clear_pipe;
 	}
-	if (res != out->len) {
+	if ((uint32_t)res != out->len) {
 		res = -EIO;
 		fuse_log(FUSE_LOG_ERR, "fuse: short splice from pipe: %u/%u\n",
 			res, out->len);
@@ -3061,7 +3061,7 @@ _do_init(fuse_req_t req, const fuse_ino_t nodeid, const void *op_in,
 		return;
 	}
 
-	if (se->conn.max_read != 0 && se->conn.max_read < getpagesize()) {
+	if (se->conn.max_read != 0 && se->conn.max_read < (uint32_t)getpagesize()) {
 		fuse_log(FUSE_LOG_WARNING, "fuse: maximum read size below page size\n");
 		se->conn.max_read = getpagesize();
 	}
@@ -3077,7 +3077,7 @@ _do_init(fuse_req_t req, const fuse_ino_t nodeid, const void *op_in,
 	    bufsize = UINT_MAX;
 	se->conn.max_write = MIN(se->conn.max_write, bufsize - FUSE_BUFFER_HEADER_SIZE);
 
-	if (se->conn.max_write < getpagesize()) {
+	if (se->conn.max_write < (uint32_t)getpagesize()) {
 		fuse_log(FUSE_LOG_WARNING, "fuse: maximum write size below page size\n");
 		se->conn.max_write = getpagesize();
 	}
@@ -4598,7 +4598,7 @@ pipe_retry:
 		return -err;
 	}
 
-	if (res < sizeof(struct fuse_in_header)) {
+	if ((size_t)res < sizeof(struct fuse_in_header)) {
 		fuse_log(FUSE_LOG_ERR, "short splice from fuse device\n");
 		return -EIO;
 	}
@@ -4614,7 +4614,7 @@ pipe_retry:
 	 * fuse_loop_mt() needs to check for FORGET so this more than
 	 * just an optimization.
 	 */
-	if (res < sizeof(struct fuse_in_header) + sizeof(struct fuse_write_in) +
+	if ((size_t)res < sizeof(struct fuse_in_header) + sizeof(struct fuse_write_in) +
 			  pagesize) {
 		struct fuse_bufvec src = { .buf[0] = tmpbuf, .count = 1 };
 		struct fuse_bufvec dst = { .count = 1 };
@@ -4640,13 +4640,13 @@ pipe_retry:
 			fuse_ll_clear_pipe(se);
 			return res;
 		}
-		if (res < tmpbuf.size) {
+		if ((size_t)res < tmpbuf.size) {
 			fuse_log(FUSE_LOG_ERR,
 				 "fuse: copy from pipe: short read\n");
 			fuse_ll_clear_pipe(se);
 			return -EIO;
 		}
-		assert(res == tmpbuf.size);
+		assert((size_t)res == tmpbuf.size);
 
 	} else {
 		/* Don't overwrite buf->mem, as that would cause a leak */

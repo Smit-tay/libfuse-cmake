@@ -105,7 +105,7 @@ static void cusexmp_read(fuse_req_t req, size_t size, off_t off,
 {
 	(void)fi;
 
-	if (off >= cusexmp_size)
+	if ((uint64_t)off >= cusexmp_size)
 		off = cusexmp_size;
 	if (size > cusexmp_size - off)
 		size = cusexmp_size - off;

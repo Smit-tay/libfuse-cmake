@@ -117,7 +117,7 @@ static int fioc_open(const char *path, struct fuse_file_info *fi)
 
 static int fioc_do_read(char *buf, size_t size, off_t offset)
 {
-	if (offset >= fioc_size)
+	if ((uint64_t)offset >= fioc_size)
 		return 0;
 
 	if (size > fioc_size - offset)
