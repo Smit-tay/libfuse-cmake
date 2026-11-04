@@ -56,6 +56,7 @@ include(CheckLanguage)
 check_language(CXX)
 if(NOT FUSE_PLATFORM STREQUAL "dragonfly" AND CMAKE_CXX_COMPILER)
     enable_language(CXX)
+    fuse_strip_ndebug(CXX)
     add_executable(passthrough_hp passthrough_hp.cc)
     target_link_libraries(passthrough_hp PRIVATE fuse3)
     # meson passes cpp_args: '-std=c++20'; CMAKE_CXX_STANDARD is already 20.

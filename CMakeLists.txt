@@ -87,13 +87,21 @@ if(NOT _multi_config AND NOT CMAKE_BUILD_TYPE)
         "Build type (default RelWithDebInfo = meson's debugoptimized)" FORCE)
 endif()
 option(OPTION_NDEBUG "Define NDEBUG, disabling assert() (meson: b_ndebug)" OFF)
-if(NOT OPTION_NDEBUG)
-    foreach(_lang C CXX)
+
+# CMake creates CMAKE_<LANG>_FLAGS_<CONFIG> when a language is enabled, so this
+# has to run after each enable_language() (C here, C++ in example/). Touching
+# the variable earlier would create an empty one that hides the real -O2 -g.
+macro(fuse_strip_ndebug lang)
+    if(NOT OPTION_NDEBUG)
         foreach(_cfg RELEASE RELWITHDEBINFO MINSIZEREL)
             string(REGEX REPLACE "(^| )[-/]DNDEBUG( |$)" " "
-                   CMAKE_${_lang}_FLAGS_${_cfg} "${CMAKE_${_lang}_FLAGS_${_cfg}}")
+                   CMAKE_${lang}_FLAGS_${_cfg} "${CMAKE_${lang}_FLAGS_${_cfg}}")
         endforeach()
-    endforeach()
+    endif()
+endmacro()
+
+fuse_strip_ndebug(C)
+if(NOT OPTION_NDEBUG)
     # meson (>= 1.4) also turns on libstdc++'s cheap precondition checks
     # whenever NDEBUG is off.
     add_compile_definitions($<$<COMPILE_LANGUAGE:CXX>:_GLIBCXX_ASSERTIONS=1>)
