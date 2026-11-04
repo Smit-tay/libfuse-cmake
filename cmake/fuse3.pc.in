@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+includedir=@pc_includedir@
+libdir=@pc_libdir@
+@pc_variables@
+Name: fuse3
+Description: Filesystem in Userspace
+Version: @PROJECT_VERSION_FULL@
+@pc_requires_private@Libs: -L${libdir} -lfuse3 -lpthread
+Libs.private: @pc_libs_private@
+Cflags: -I${includedir}/fuse3

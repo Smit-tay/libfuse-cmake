@@ -67,6 +67,11 @@ set(OPTION_SERVICE_SOCKET_PERMS "" CACHE STRING
     "Default fuse server socket permissions (if empty, 0220) (meson: service-socket-perms)")
 set(OPTION_SYSTEMD_SYSTEM_UNIT_DIR "" CACHE STRING
     "Where to install systemd unit files (if empty, query pkg-config(1)) (meson: systemd-system-unit-dir)")
+set(OPTION_UDEVRULESDIR "" CACHE STRING
+    "Where to install udev rules (if empty, query pkg-config(1)) (meson: udevrulesdir)")
+set(OPTION_INITSCRIPTDIR "/etc/init.d/" CACHE STRING
+    "Init script installation location (if empty, disable init script installation) (meson: initscriptdir)")
+option(OPTION_USEROOT "Set owner and setuid bits on installed files (meson: useroot)" ON)
 
 #
 # Build type and NDEBUG (meson: buildtype=debugoptimized, b_ndebug=false)
