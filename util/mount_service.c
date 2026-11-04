@@ -1286,7 +1286,9 @@ static int attach_to_mountpoint(struct mount_service *mo, mode_t expected_fmt,
 		 * This is a regular file, so we point mount() at the open file
 		 * descriptor.
 		 */
-		asprintf(&mo->real_mountpoint, "/dev/fd/%d", mountfd);
+		/* on failure the pointer is undefined; the check below wants NULL */
+		if (asprintf(&mo->real_mountpoint, "/dev/fd/%d", mountfd) < 0)
+			mo->real_mountpoint = NULL;
 		break;
 	case S_IFDIR:
 		/*

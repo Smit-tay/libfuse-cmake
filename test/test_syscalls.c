@@ -998,7 +998,7 @@ static int test_statx(void)
 		return -1;
 
 	if (sb.stx_btime.tv_sec == tp.tv_sec &&
-	    sb.stx_btime.tv_nsec >= tp.tv_nsec)
+	    sb.stx_btime.tv_nsec >= (__u32)tp.tv_nsec)
 		return -1;
 
 	unlink(testfile);

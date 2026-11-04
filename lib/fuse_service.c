@@ -782,7 +782,7 @@ int fuse_service_append_args(struct fuse_service *sf,
 			ret = -error;
 			goto out_str;
 		}
-		if (received < memfd_arg.len) {
+		if ((size_t)received < memfd_arg.len) {
 			fuse_log(FUSE_LOG_ERR, "fuse: service args file argv[%u] short read %zd",
 				 i, received);
 			ret = -EBADMSG;
@@ -1162,7 +1162,9 @@ int fuse_service_session_mount(struct fuse_service *sf, struct fuse_session *se,
 	 * that the caller needn't call fuse_daemonize().
 	 */
 	opts->foreground = 1;
-	(void)chdir("/");
+	if (chdir("/") == -1)
+		fuse_log(FUSE_LOG_WARNING, "fuse: service mount: chdir(\"/\"): %s\n",
+			 strerror(errno));
 
 out_strings:
 	free(mtabopts);

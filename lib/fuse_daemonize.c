@@ -46,6 +46,16 @@ struct fuse_daemonize {
 };
 
 /* Global daemonization object pointer */
+/*
+ * Leaving the working directory is not essential to daemonizing, so a
+ * failure is reported but not fatal.
+ */
+static void chdir_root(const char *caller)
+{
+	if (chdir("/") == -1)
+		fprintf(stderr, "%s: chdir(\"/\"): %s\n", caller, strerror(errno));
+}
+
 static struct fuse_daemonize daemonize = {
 	.signal_pipe_wr = -1,
 	.death_pipe_rd = -1,
@@ -221,7 +231,7 @@ int fuse_daemonize_early_start(unsigned int flags)
 	dm->stop_pipe_wr = -1;
 
 	if (!(flags & FUSE_DAEMONIZE_NO_CHDIR))
-		(void)chdir("/");
+		chdir_root(__func__);
 
 	if (!(flags & FUSE_DAEMONIZE_NO_BACKGROUND)) {
 		dm->active = true;
@@ -358,8 +368,10 @@ int fuse_daemonize(int foreground)
 			waiter[0] = -1;
 			break;
 		default:
-			/* parent */
-			(void)read(waiter[0], &completed, sizeof(completed));
+			/* parent: wait for the child, or EOF if it died first */
+			while (read(waiter[0], &completed, sizeof(completed)) == -1 &&
+			       errno == EINTR)
+				;
 			close(waiter[0]);
 			close(waiter[1]);
 			_exit(0);
@@ -371,7 +383,7 @@ int fuse_daemonize(int foreground)
 			return -1;
 		}
 
-		(void)chdir("/");
+		chdir_root(__func__);
 
 		nullfd = open("/dev/null", O_RDWR, 0);
 		if (nullfd != -1) {
@@ -384,11 +396,14 @@ int fuse_daemonize(int foreground)
 
 		/* Propagate completion of daemon initialization */
 		completed = 1;
-		(void)write(waiter[1], &completed, sizeof(completed));
+		/* if this fails the parent sees EOF instead and exits all the same */
+		while (write(waiter[1], &completed, sizeof(completed)) == -1 &&
+		       errno == EINTR)
+			;
 		close(waiter[1]);
 		waiter[1] = -1;
 	} else {
-		(void)chdir("/");
+		chdir_root(__func__);
 	}
 
 	return 0;

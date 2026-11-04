@@ -166,15 +166,24 @@ static int mtab_needs_update(const char *mnt)
 	} else {
 		uid_t ruid;
 		int err;
+		int raised = 0;
 
+		/*
+		 * Check access as root where possible. Without CAP_SETUID the
+		 * raise fails and access() checks as the real user instead.
+		 */
 		ruid = getuid();
 		if (ruid != 0)
-			setreuid(0, -1);
+			raised = setreuid(0, -1) == 0;
 
 		res = access(_PATH_MOUNTED, W_OK);
 		err = (res == -1) ? errno : 0;
-		if (ruid != 0)
-			setreuid(ruid, -1);
+		/* as in fuse_mount_spawn(): never run on with the raised uid */
+		if (raised && setreuid(ruid, -1) == -1) {
+			fuse_log(FUSE_LOG_ERR, "fuse: failed to restore real uid: %s\n",
+				 strerror(errno));
+			abort();
+		}
 
 		if (err == EROFS)
 			return 0;

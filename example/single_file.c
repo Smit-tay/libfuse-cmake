@@ -920,7 +920,7 @@ int single_file_configure(const char *device, const char *filename)
 	}
 
 	proposed_blocksize = single_file.blocksize ? single_file.blocksize :
-						     sysconf(_SC_PAGESIZE);
+						     (unsigned int)sysconf(_SC_PAGESIZE);
 	if ((unsigned int)lbasize > proposed_blocksize) {
 		fprintf(stderr, "%s: lba size %d smaller than blocksize %u\n",
 			device, lbasize, proposed_blocksize);
