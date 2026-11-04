@@ -325,10 +325,13 @@ def main():
         rep.section(f'Test suite ({who})')
         results = {}
         for name, bdir in (('meson', mdir), ('cmake', cdir)):
-            cmd = [str(SOURCE_DIR / 'test' / 'run-tests.py'), '--build-dir', str(bdir),
+            # This interpreter, not the shebang's: sudo resets PATH, and the
+            # python3 it would find may lack pytest (e.g. a CI venv's).
+            cmd = [sys.executable, str(SOURCE_DIR / 'test' / 'run-tests.py'),
+                   '--build-dir', str(bdir),
                    '--run-dir', str(work / f'run-{name}'), '-j', str(args.jobs)]
             if args.tests_as_root:
-                cmd = ['sudo'] + cmd
+                cmd = ['sudo', 'env', f'PATH={os.environ["PATH"]}'] + cmd
             log = work / f'{name}-tests.log'
             rc = run(cmd, log, env, check=False)
             results[name] = test_results(log)

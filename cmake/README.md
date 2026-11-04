@@ -13,6 +13,12 @@ What lives here:
 | `fuse3.pc.in` | template for the installed pkg-config file, laid out like meson's `pkg.generate()` |
 | `check-meson-parity.py` | builds the tree with both systems and compares the results |
 
+CI: `.github/workflows/cmake.yml` is the fork's only addition to upstream's
+workflows. It builds with CMake (gcc, clang, gcc `-m32`; unprivileged and as
+root), fails on any warning, runs the test suite, and runs
+`check-meson-parity.py --tests-as-root` for gcc and clang. Every other
+workflow is upstream's, unchanged, and builds with meson.
+
 Each `CMakeLists.txt` follows its `meson.build` section by section, with the
 meson construct it mirrors named in a comment, so an upstream change to one
 `meson.build` maps to one place in CMake.

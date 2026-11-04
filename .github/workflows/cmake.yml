@@ -1,0 +1,143 @@
+# Fork-only workflow: every other workflow here is upstream's and builds with
+# meson. This one builds and tests the CMake build, and checks that it still
+# produces what meson produces (cmake/check-meson-parity.py).
+name: 'CMake Build & Test'
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - 'fuse-[0-9]+.[0-9]+*'
+  pull_request:
+    branches:
+      - master
+      - 'fuse-[0-9]+.[0-9]+*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: "cmake (${{ matrix.config }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - config: gcc
+            cc: gcc
+            cxx: g++
+          - config: gcc-root
+            cc: gcc
+            cxx: g++
+            root: true
+          - config: clang
+            cc: clang
+            cxx: clang++
+          - config: clang-root
+            cc: clang
+            cxx: clang++
+            root: true
+          # size_t and off_t differ in width only here
+          - config: gcc-m32
+            cc: gcc
+            cxx: g++
+            m32: true
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      WORK_DIR: ${{ github.workspace }}/cmake-ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.x'
+      # --full also pip-installs requirements.txt, which brings cmake
+      - run: ./.github/workflows/install-ubuntu-dependencies.sh --full
+      - run: test/ci/prepare-runner.sh "$WORK_DIR"
+
+      - name: Configure
+        run: |
+          opts=(-G Ninja -DOPTION_USEROOT=OFF)
+          if [ "${{ matrix.m32 }}" = true ]; then
+              export PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig
+              opts+=(-DCMAKE_C_FLAGS=-m32 -DCMAKE_CXX_FLAGS=-m32
+                     -DCMAKE_EXE_LINKER_FLAGS=-m32 -DCMAKE_SHARED_LINKER_FLAGS=-m32)
+          fi
+          cmake -S . -B "$WORK_DIR/build" "${opts[@]}"
+
+      # The CMake build suppresses no warnings, so any warning is a regression.
+      - name: Build (no warnings allowed)
+        run: |
+          set -o pipefail
+          cmake --build "$WORK_DIR/build" 2>&1 | tee "$WORK_DIR/build.log"
+          if grep -q 'warning:' "$WORK_DIR/build.log"; then
+              grep 'warning:' "$WORK_DIR/build.log" |
+                  sed 's/^/::error::/'
+              exit 1
+          fi
+
+      - name: Test
+        run: |
+          cmd=(test/run-tests.py --build-dir "$WORK_DIR/build" --run-dir "$WORK_DIR/run")
+          if [ "${{ matrix.root }}" = true ]; then
+              sudo env PATH="$PATH" python3 "${cmd[@]}"
+              sudo chown -R "$(id -u):$(id -g)" "$WORK_DIR"
+          else
+              python3 "${cmd[@]}" --setuid-helpers
+          fi
+
+      - name: Print failed test logs
+        if: failure()
+        run: test/run-tests.py --print-logged-errors "$WORK_DIR/run"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cmake-test-logs-${{ matrix.config }}
+          path: |
+            cmake-ci/build.log
+            cmake-ci/run/
+            !cmake-ci/run/**/core.*
+            !cmake-ci/run/**/mnt
+            !cmake-ci/run/**/*.sock
+          if-no-files-found: ignore
+          retention-days: 14
+
+  meson-parity:
+    runs-on: ubuntu-latest
+    name: "meson parity (${{ matrix.cc }})"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cc: gcc
+            cxx: g++
+          - cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.x'
+      - run: ./.github/workflows/install-ubuntu-dependencies.sh --full
+      - run: test/ci/prepare-runner.sh parity
+      - run: >
+          cmake/check-meson-parity.py --tests-as-root
+          --cc ${{ matrix.cc }} --cxx ${{ matrix.cxx }}
+          --work-dir parity -j "$(nproc)"
+
+      - name: Upload parity logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: meson-parity-logs-${{ matrix.cc }}
+          path: |
+            parity/*.log
+            parity/run-*/
+            !parity/run-*/**/core.*
+            !parity/run-*/**/mnt
+            !parity/run-*/**/*.sock
+          if-no-files-found: ignore
+          retention-days: 14
