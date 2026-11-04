@@ -61,9 +61,13 @@ static inline uint64_t fuse_higher_32_bits(uint64_t nr)
 		((type *)(__mptr - offsetof(type, member))); \
 	})
 
+/* __has_attribute in an #if is an error where it is not defined */
+#if defined(__has_attribute)
 #if __has_attribute(__fallthrough__)
 #define fallthrough __attribute__((__fallthrough__))
-#else
+#endif
+#endif
+#ifndef fallthrough
 #define fallthrough do {} while (0)
 #endif
 
