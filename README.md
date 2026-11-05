@@ -1,18 +1,35 @@
-libfuse
-=======
+libfuse-cmake
+=============
 
-About
------
+**libfuse, built with CMake.**
 
-This is a fork of the libfuse reference implementation which may be found here:
-[https://github.com/libfuse/libfuse](https://github.com/libfuse/libfuse)
+This is a fork of [libfuse](https://github.com/libfuse/libfuse), the
+reference implementation of the Linux FUSE userspace library. The code is
+upstream's; what this fork adds is a complete **CMake** build, and that is
+the whole point of it. If you want libfuse in a CMake-based project or
+toolchain, or just prefer CMake to meson, this is the place.
 
-NOTE: Not all upstream release tags are present - that's a GitHub PITA issue that doesn't seem to be easily automated.
+What that means in practice:
 
-This fork is designed to build with **CMake**, otherwise it should be identical to
-the reference platform.  The best reference for using libfuse is the reference
-implementation.  BUT - This is the place to come for information about building
-libfuse with CMake instead of meson.
+- **CMake is the primary build here.** It builds, installs and tests
+  everything upstream's meson build does: the library, `fusermount3`,
+  `mount.fuse3`, the examples, the test suite, the pkg-config file, man
+  pages, udev rules and the init script.
+- **It produces what meson produces.** CI checks every change to
+  `master` against upstream's own meson build with
+  [`cmake/check-meson-parity.py`](cmake/README.md): the same generated
+  headers, compile flags, programs, exported symbols, install tree and test
+  results. You can drop it in wherever upstream libfuse is expected.
+- **No warning suppressions.** Upstream's meson build turns off
+  `-Wsign-compare` and `-Wunused-result`; this build turns off nothing, and
+  the warnings are fixed in the code instead.
+- **It follows upstream.** The fork is regularly synced with upstream
+  `master`, and the meson files are kept unchanged, so meson still works
+  too.
+
+Anything that isn't about the build is upstream's business: for the API,
+documentation and libfuse itself, upstream is the reference. For building
+libfuse with CMake, read on.
 
 FUSE (Filesystem in Userspace) is an interface for userspace programs
 to export a filesystem to the Linux kernel. The FUSE project consists
@@ -56,46 +73,45 @@ Supported Platforms
 * For OS-X, please use [OSXFUSE](https://osxfuse.github.io/)
   
 
-Installation
-------------
+Getting the source
+------------------
 
-You can download libfuse from https://github.com/libfuse/libfuse/releases. To build and
-install, you must use [Meson](http://mesonbuild.com/) and
-[Ninja](https://ninja-build.org).  After downloading the tarball and `.sig` file, verify
-it using [signify](https://www.openbsd.org/papers/bsdcan-signify.html):
+Upstream's release tarballs contain only the meson build. To build with
+CMake, clone this repository, whose `master` tracks upstream `master`:
 
-    signify -V -m fuse-X.Y.Z.tar.gz -p fuse-X.Y.pub
-    
-The `fuse-X.Y.pub` file contains the signing key and needs to be obtained from a
-trustworthy source. Each libfuse release contains the signing key for the release after it
-in the `signify` directory, so you only need to manually acquire this file once when you
-install libfuse for the first time.
+    $ git clone https://github.com/Smit-tay/libfuse-cmake.git
+    $ cd libfuse-cmake
 
-To build and install, you are free to use meson or CMake
+Not every upstream release tag is mirrored in this fork.
 
-We recommend to use [CMake](https://cmake.org/) the hugely superior meta-make
-system.  CMake allows a developer to use a wide variety of build systems and
-includes native support for various command-line or GUI environments such as
-Visual Studio, Eclipse, CodeBlocks, Ninja, or plain old Unix make.
 
-You are free to use the Unix make, Ninja, or any other CMake supported make
-system - see, CMake is better than meson !
+Building with CMake
+-------------------
 
-### Building with CMake
+You need CMake 3.21 or later, a C compiler, and make or
+[Ninja](https://ninja-build.org). Optional: a C++ compiler (for the
+`passthrough_hp` and `memfs_ll` examples), liburing (fuse-over-io-uring),
+and pkg-config with udev and systemd (to find their install directories).
 
-Out of source builds are *highly* recommended.  Simply create a (temporary)
-build directory and run CMake:
+Configure into a separate build directory, then build:
 
-    $ mkdir build; cd build
-    $ cmake ..
+    $ cmake -S . -B build
+    $ cmake --build build -j
 
-The defaults match upstream's meson build: utilities, examples and tests are
-all built, and the build type is `RelWithDebInfo` (`-O2 -g`, meson's
-`debugoptimized`). As in meson, `NDEBUG` is never defined unless you ask for
-it - the tests and examples rely on `assert()` running.
+Any CMake generator works: add `-G Ninja` to use Ninja, or open the build
+in an IDE that understands CMake.
 
-Options are set with `-D` on the command line (or with `ccmake`/`cmake-gui`).
-Each one mirrors a meson option:
+The defaults match upstream's meson build: utilities, examples and tests
+are all built, and the build type is `RelWithDebInfo` (`-O2 -g`, meson's
+`debugoptimized`). As in meson, `NDEBUG` is never defined unless you ask
+for it: the tests and examples rely on `assert()`.
+
+### Options
+
+Options are set with `-D` when configuring, or interactively with `ccmake
+build` or `cmake-gui`. To change one later, re-run the configure step with
+the new value, e.g. `cmake -B build -DOPTION_BUILD_EXAMPLES=OFF`. Each
+option mirrors a meson option:
 
 | CMake option | meson option | Default |
 |---|---|---|
@@ -115,55 +131,124 @@ Each one mirrors a meson option:
 | `OPTION_USEROOT` | `useroot` | `ON` (make fusermount3 setuid root on install) |
 | `OPTION_NDEBUG` | `b_ndebug` | `OFF` |
 
-For example, to install into your home directory without the setuid step:
+The standard CMake settings work as usual, e.g. `CMAKE_INSTALL_PREFIX`
+(default `/usr/local`), `CMAKE_BUILD_TYPE`, `CMAKE_C_COMPILER`.
 
-    $ cmake -DCMAKE_INSTALL_PREFIX=$HOME/FUSE/install -DOPTION_USEROOT=OFF ..
 
-To build, test and install, you then use make (or other supported build systems):
+Testing
+-------
 
-    $ make
-    $ sudo ../test/run-tests.py --build-dir .
-    $ sudo make install
+The tests need bash and Python 3, and gdb to resolve core dumps; `pip
+install -r requirements.txt` installs the Python side of the tooling.
+Most tests mount filesystems, so run the full suite as root:
 
-`make check` builds everything and runs the same suite through `ctest`.
+    $ sudo test/run-tests.py --build-dir build
 
-### Running the tests
+Alternatively, run it as a regular user and let it make
+*util/fusermount3* setuid root first (it uses sudo for that); the tests
+that need root then skip themselves:
 
-Running the tests requires bash, Python 3 and (to resolve core dumps)
-gdb. Instead of running the tests as root, the majority of tests can
-also be run as a regular user if *util/fusermount3* is made setuid root
-first; the rest then skip themselves:
+    $ test/run-tests.py --build-dir build --setuid-helpers
 
-    $ ../test/run-tests.py --build-dir . --setuid-helpers
+Without either, most tests are skipped. Each test gets its own working
+and log directory, and the runner prints what every one of them cost. See
+the README under *test/cases* for how to add one and where to look when
+one fails.
 
-Each test gets its own working and log directory, and the runner prints
-what every one of them cost. See the README under *test/cases* for how
-to add one and where to look when one fails.
+The suite is also registered with CTest, as the same two entries `meson
+test` has (`fuse-tests`, and `fuse-tests-io-uring`, which skips itself
+where the kernel lacks io-uring support):
 
-NOTE: Some tests are designed to "drop privileges" and so will be skipped if the
-user is not root.
+    $ ctest --test-dir build                # run the suite
+    $ cmake --build build --target check    # build everything, then run it
 
-### Building with meson
 
-The meson build files are kept, unchanged from upstream, so upstream's own
+Installing
+----------
+
+    $ sudo cmake --install build
+
+This installs the library, headers (under `include/fuse3`), `fuse3.pc`,
+`fusermount3`, `mount.fuse3`, the man pages, the udev rule, the init
+script and `fuse.conf`, in the same places meson would; the library
+directory follows the platform convention (`lib64`, or `lib/<multiarch>`
+on Debian and Ubuntu). With `OPTION_USEROOT` on (the default), the
+install step also makes `fusermount3` setuid root, which is why it needs
+root; see *Security implications* below. Run `sudo ldconfig` afterwards
+if your system needs it to find a library in a new location.
+
+To stage the install for packaging, set `DESTDIR`:
+
+    $ DESTDIR=/tmp/fuse-stage cmake --install build
+
+To install without root, e.g. into your home directory, turn off the
+setuid step and redirect the two files that otherwise go to fixed system
+paths (`/etc/init.d` and the system udev rules directory), exactly as
+with meson:
+
+    $ cmake -S . -B build -DCMAKE_INSTALL_PREFIX=$HOME/fuse \
+          -DOPTION_USEROOT=OFF -DOPTION_INITSCRIPTDIR= \
+          -DOPTION_UDEVRULESDIR=$HOME/fuse/lib/udev/rules.d
+    $ cmake --build build -j && cmake --install build
+
+
+Using libfuse from your own CMake project
+-----------------------------------------
+
+The installed libfuse is found through pkg-config, like upstream's:
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3)
+
+    target_link_libraries(myfs PRIVATE PkgConfig::FUSE3)
+
+For an install outside the default search path, point `PKG_CONFIG_PATH`
+at its `pkgconfig` directory when configuring your project.
+
+
+Building with meson
+-------------------
+
+The meson build files are kept unchanged from upstream, so upstream's
 instructions also work:
 
-    $ mkdir build; cd build
-    $ meson setup ..
-    $ meson configure            # list options
-    $ ninja
+    $ meson setup build
+    $ meson configure build      # list options
+    $ ninja -C build
+    $ sudo test/run-tests.py --build-dir build
+    $ sudo ninja -C build install
 
-### Keeping this fork in sync with upstream
+Upstream's release tarballs (meson only) are at
+https://github.com/libfuse/libfuse/releases. Verify one with
+[signify](https://www.openbsd.org/papers/bsdcan-signify.html) after
+downloading it and its `.sig` file:
 
-See [cmake/README.md](cmake/README.md) for how upstream changes are merged and
-how `cmake/check-meson-parity.py` checks that the CMake build still produces
-what meson does.
+    signify -V -m fuse-X.Y.Z.tar.gz -p fuse-X.Y.pub
+
+The `fuse-X.Y.pub` file contains the signing key and needs to be obtained
+from a trustworthy source. Each libfuse release contains the signing key
+for the release after it in the `signify` directory, so you only need to
+manually acquire this file once.
+
+
+How the fork is maintained
+--------------------------
+
+[cmake/README.md](cmake/README.md) describes how upstream changes are
+merged, how `cmake/check-meson-parity.py` compares the two builds, and
+the few deliberate differences between them. On GitHub, the
+`CMake Build & Test` workflow builds with gcc, clang and 32-bit gcc
+(warnings are errors), runs the test suite unprivileged and as root, and
+runs the parity check, on every push to `master` and every pull request;
+upstream's own workflows run alongside it.
+
 
 Security implications
 ---------------------
 
-The *fusermount3* program is installed setuid root. This is done to
-allow normal users to mount their own filesystem implementations.
+The *fusermount3* program is installed setuid root (with CMake, unless
+`OPTION_USEROOT` is off). This is done to allow normal users to mount
+their own filesystem implementations.
 If built, the *fuservicemount3* program will also be installed setuid
 root so that normal users can access containerized filesystem
 implementations.
@@ -231,8 +316,8 @@ https://lore.kernel.org/fuse-devel/).
 Please report any bugs on the GitHub issue tracker at
 https://github.com/libfuse/libfuse/issues.
 
-Please report CMake related libfuse bugs here:
-https://github.com/Smit-tay/libfuse-cmake/issues
+Problems with the CMake build belong to this fork; please report them
+at https://github.com/Smit-tay/libfuse-cmake/issues.
 
 
 Professional Support
